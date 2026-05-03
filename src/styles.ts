@@ -5,9 +5,6 @@ export const cardStyles = css`
   :host {
     --wp-text: var(--primary-text-color, #ffffff);
     --wp-text-dim: var(--secondary-text-color, rgba(255, 255, 255, 0.62));
-    /* Read --background-color first (Carmen's Wall Panel theme defines
-       it explicitly), then fall back to HA's standard names so the
-       card still picks up sane values under any other theme. */
     --wp-bg: var(--background-color, var(--primary-background-color, #1a1c1f));
     --wp-card: var(--background-color, var(--primary-background-color, var(--ha-card-background, var(--card-background-color, #3a3d42))));
     --wp-card-2: var(--secondary-background-color, #4a4d52);
