@@ -6,7 +6,7 @@ export const cardStyles = css`
     --wp-text: var(--primary-text-color, #ffffff);
     --wp-text-dim: var(--secondary-text-color, rgba(255, 255, 255, 0.62));
     --wp-bg: var(--primary-background-color, #1a1c1f);
-    --wp-card: var(--ha-card-background, var(--card-background-color, #3a3d42));
+    --wp-card: var(--primary-background-color, #3a3d42));
     --wp-card-2: var(--secondary-background-color, #4a4d52);
     --wp-accent: var(--primary-color, #8eb1bf);
     --wp-accent-2: var(--accent-color, #8ba680);
