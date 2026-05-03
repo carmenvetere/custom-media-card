@@ -105,6 +105,7 @@ favorites:
 Override any of the CSS custom properties via a `card-mod` block or a custom theme:
 
 ```css
+/* Palette */
 --wp-text
 --wp-text-dim
 --wp-bg
@@ -112,7 +113,26 @@ Override any of the CSS custom properties via a `card-mod` block or a custom the
 --wp-card-2
 --wp-accent
 --wp-accent-2
+
+/* Translucent fills (derived from palette by default) */
+--wp-overlay-soft       /* button bg, tab bg, pill bg */
+--wp-overlay            /* banner bg, group-volumes bg */
+--wp-overlay-strong     /* title bg when menu is open */
+--wp-scrim              /* dropdown backdrop */
+--wp-divider            /* progress bar / volume slider track */
+--wp-on-accent-soft     /* check circle on grouped row */
+--wp-pill-on-active     /* secondary pill over an accent surface */
+--wp-accent-soft        /* "in group" row tint — color-mix of --wp-accent */
+
+/* Shadows */
+--wp-shadow-card
+--wp-shadow-cover
+--wp-shadow-play
+--wp-shadow-menu
+
+/* Geometry & scale */
 --wp-radius
+--wp-radius-pill
 --wp-track-scale
 --wp-vol-scale
 ```

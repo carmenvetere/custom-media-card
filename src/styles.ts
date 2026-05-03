@@ -10,6 +10,24 @@ export const cardStyles = css`
     --wp-card-2: #4a4d52;
     --wp-accent: #8eb1bf;
     --wp-accent-2: #8ba680;
+    /* Translucent fills derived from the palette. Overrideable so a
+       theme can re-tint pills/banners without touching the base colors. */
+    --wp-overlay-soft: rgba(0, 0, 0, 0.18);
+    --wp-overlay: rgba(0, 0, 0, 0.22);
+    --wp-overlay-strong: rgba(0, 0, 0, 0.28);
+    --wp-scrim: rgba(0, 0, 0, 0.45);
+    --wp-divider: rgba(255, 255, 255, 0.18);
+    --wp-on-accent-soft: rgba(255, 255, 255, 0.6);
+    --wp-pill-on-active: rgba(255, 255, 255, 0.12);
+    /* color-mix lets the "grouped" row tint follow --wp-accent. Falls
+       back via the second declaration for the rare browser without it. */
+    --wp-accent-soft: rgba(142, 177, 191, 0.45);
+    --wp-accent-soft: color-mix(in srgb, var(--wp-accent) 45%, transparent);
+    /* Shadows */
+    --wp-shadow-card: 0 8px 32px rgba(0, 0, 0, 0.18);
+    --wp-shadow-cover: 0 8px 32px rgba(0, 0, 0, 0.35);
+    --wp-shadow-play: 0 4px 16px rgba(0, 0, 0, 0.25);
+    --wp-shadow-menu: 0 16px 40px rgba(0, 0, 0, 0.5);
     --wp-radius: 28px;
     --wp-radius-pill: 999px;
     --wp-track-scale: 1.15;
@@ -25,7 +43,7 @@ export const cardStyles = css`
     flex-direction: column;
     overflow: hidden;
     position: relative;
-    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.18);
+    box-shadow: var(--wp-shadow-card);
     height: 100%;
     min-height: 600px;
   }
@@ -43,7 +61,7 @@ export const cardStyles = css`
     width: 44px;
     height: 44px;
     border-radius: 50%;
-    background: rgba(0, 0, 0, 0.18);
+    background: var(--wp-overlay-soft);
     color: var(--wp-text);
     border: 0;
     cursor: pointer;
@@ -71,14 +89,14 @@ export const cardStyles = css`
     transition: background 0.15s;
   }
   .hdr-title.menu-open {
-    background: rgba(0, 0, 0, 0.28);
+    background: var(--wp-overlay-strong);
   }
   .group-pill {
     font-size: 13px;
     opacity: 0.75;
     padding: 3px 10px;
     border-radius: 999px;
-    background: rgba(0, 0, 0, 0.22);
+    background: var(--wp-overlay);
   }
   .chev {
     transition: transform 0.2s;
@@ -133,7 +151,7 @@ export const cardStyles = css`
     background-size: cover;
     background-position: center;
     background-repeat: no-repeat;
-    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.35);
+    box-shadow: var(--wp-shadow-cover);
   }
   .meta {
     text-align: center;
@@ -161,7 +179,7 @@ export const cardStyles = css`
   .progress .bar {
     flex: 1;
     height: 4px;
-    background: rgba(255, 255, 255, 0.18);
+    background: var(--wp-divider);
     border-radius: 999px;
     overflow: hidden;
   }
@@ -200,7 +218,7 @@ export const cardStyles = css`
     display: flex;
     align-items: center;
     justify-content: center;
-    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.25);
+    box-shadow: var(--wp-shadow-play);
   }
   .vol-row {
     display: flex;
@@ -213,7 +231,7 @@ export const cardStyles = css`
   .slider {
     flex: 1;
     height: calc(22px * var(--wp-vol-scale));
-    background: rgba(255, 255, 255, 0.18);
+    background: var(--wp-divider);
     border-radius: 999px;
     position: relative;
     cursor: pointer;
@@ -252,7 +270,7 @@ export const cardStyles = css`
     flex-wrap: wrap;
   }
   .tab {
-    background: rgba(0, 0, 0, 0.18);
+    background: var(--wp-overlay-soft);
     color: var(--wp-text);
     border: 0;
     cursor: pointer;
@@ -301,7 +319,7 @@ export const cardStyles = css`
     display: flex;
     align-items: center;
     justify-content: center;
-    color: #fff;
+    color: var(--wp-text);
   }
 
   /* GROUPING */
@@ -310,7 +328,7 @@ export const cardStyles = css`
     justify-content: space-between;
     align-items: center;
     padding: 10px 14px;
-    background: rgba(0, 0, 0, 0.22);
+    background: var(--wp-overlay);
     border-radius: 14px;
     margin-bottom: 12px;
     gap: 14px;
@@ -357,7 +375,7 @@ export const cardStyles = css`
     text-align: left;
   }
   .grp-row.grouped {
-    background: rgba(142, 177, 191, 0.45);
+    background: var(--wp-accent-soft);
     color: var(--wp-bg);
   }
   .grp-row.primary {
@@ -370,7 +388,7 @@ export const cardStyles = css`
     font-size: 10px;
     font-weight: 700;
     padding: 4px 9px;
-    background: rgba(0, 0, 0, 0.18);
+    background: var(--wp-overlay-soft);
     color: var(--wp-bg);
     border-radius: 999px;
     letter-spacing: 0.1em;
@@ -378,7 +396,7 @@ export const cardStyles = css`
   .grp-volumes {
     margin-top: 14px;
     padding: 14px 16px;
-    background: rgba(0, 0, 0, 0.22);
+    background: var(--wp-overlay);
     border-radius: 16px;
   }
   .grp-volumes-title {
@@ -417,7 +435,7 @@ export const cardStyles = css`
     display: flex;
     align-items: flex-start;
     justify-content: center;
-    background: rgba(0, 0, 0, 0.45);
+    background: var(--wp-scrim);
     padding-top: 64px;
   }
   .menu-card {
@@ -425,7 +443,7 @@ export const cardStyles = css`
     background: var(--wp-card-2);
     border-radius: 18px;
     padding: 8px;
-    box-shadow: 0 16px 40px rgba(0, 0, 0, 0.5);
+    box-shadow: var(--wp-shadow-menu);
     max-height: 80%;
     overflow-y: auto;
   }
@@ -460,7 +478,7 @@ export const cardStyles = css`
     font-size: 10px;
     font-weight: 700;
     padding: 3px 7px;
-    background: rgba(0, 0, 0, 0.18);
+    background: var(--wp-overlay-soft);
     color: var(--wp-bg);
     border-radius: 999px;
     letter-spacing: 0.1em;
@@ -468,16 +486,33 @@ export const cardStyles = css`
   .menu-item .group-pill {
     font-size: 10px;
     padding: 3px 8px;
-    background: rgba(255, 255, 255, 0.12);
+    background: var(--wp-pill-on-active);
     border-radius: 999px;
     letter-spacing: 0.06em;
   }
 
   /* MOBILE / NARROW */
+  /* Fill the viewport so the card behaves like a phone screen.
+     100dvh handles iOS Safari's address-bar resize correctly. */
+  :host([narrow]) {
+    height: 100dvh;
+  }
+  :host([narrow]) ha-card,
+  :host([narrow]) .root {
+    height: 100%;
+    min-height: 0;
+    border-radius: 0;
+  }
   :host([narrow]) .hdr-title {
     font-size: 19px;
   }
   :host([narrow]) .grp-vol-row {
     grid-template-columns: 90px 1fr 30px;
+  }
+  /* In narrow mode, let the favorites/grouping bodies scroll the
+     whole view instead of just the inner list, so the bottom of long
+     content remains reachable on a phone-sized viewport. */
+  :host([narrow]) .pv-scroll {
+    overflow-y: auto;
   }
 `;
