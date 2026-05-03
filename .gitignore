@@ -1,3 +1,4 @@
 node_modules/
-dist/
 *.log
+# dist/ is intentionally tracked — HACS serves the built file directly
+# from the repo when no GitHub release asset is present.
