@@ -4,7 +4,7 @@
 // the active media_player entity + its group_members, and dispatches HA
 // service calls for every interactive surface.
 
-import { LitElement, html, nothing } from "lit";
+import { LitElement, html, nothing, type PropertyValues } from "lit";
 import { customElement, property, state } from "lit/decorators.js";
 import { classMap } from "lit/directives/class-map.js";
 import { styleMap } from "lit/directives/style-map.js";
@@ -44,9 +44,19 @@ export class WallPanelSonosCard extends LitElement implements LovelaceCard {
   @state() private _menuOpen = false;
   @state() private _favTab: "All" | "Playlists" | "Stations" | "Albums" = "All";
   @state() private _favQ = "";
-  // Per-entity slider value while a drag is in progress. Lets the knob
-  // track the user's finger instead of snapping back to the last hass value.
+  // Per-entity slider value held while the user drags AND briefly after
+  // release, so the knob tracks the finger and doesn't snap back to the
+  // stale hass value before the volume_set service round-trips.
   @state() private _dragVol: Record<string, number> = {};
+  // Optimistic play/playing state — flips immediately on click, cleared
+  // when hass state catches up. Avoids the perceived "lag" on the play
+  // button while the media_player.media_play_pause call is in flight.
+  @state() private _optimisticPlaying: boolean | null = null;
+  // Wall-clock used to interpolate media_position between hass updates.
+  // Bumped every 500ms while a track is playing.
+  @state() private _now = Date.now();
+  private _dragTimers: Record<string, ReturnType<typeof setTimeout>> = {};
+  private _tickHandle?: ReturnType<typeof setInterval>;
 
   // Lovelace lifecycle
   static getStubConfig(): Partial<WallPanelSonosCardConfig> {
@@ -84,6 +94,45 @@ export class WallPanelSonosCard extends LitElement implements LovelaceCard {
   }
 
   getCardSize() { return 8; }
+
+  connectedCallback() {
+    super.connectedCallback();
+    this._tickHandle = setInterval(() => {
+      // Only re-render the progress bar when there's something to advance.
+      const s = this._state(this._activeRoom);
+      if (s?.state === "playing" && this._view === "player") this._now = Date.now();
+    }, 500);
+  }
+
+  disconnectedCallback() {
+    super.disconnectedCallback();
+    if (this._tickHandle) clearInterval(this._tickHandle);
+    for (const t of Object.values(this._dragTimers)) clearTimeout(t);
+    this._dragTimers = {};
+  }
+
+  willUpdate(changed: PropertyValues) {
+    if (!changed.has("hass") || !this._config) return;
+    // Clear the optimistic play state once hass reflects what we sent.
+    if (this._optimisticPlaying !== null) {
+      const real = this._state(this._activeRoom)?.state === "playing";
+      if (real === this._optimisticPlaying) this._optimisticPlaying = null;
+    }
+    // Clear post-release volume latches whose hass value has caught up.
+    // Active drags don't have a timer entry yet, so they're left alone.
+    let nextDrag: Record<string, number> | null = null;
+    for (const key of Object.keys(this._dragVol)) {
+      if (!this._dragTimers[key]) continue;
+      const real = Math.round((this._state(key)?.attributes.volume_level ?? 0) * 100);
+      if (Math.abs(real - this._dragVol[key]) <= 2) {
+        if (!nextDrag) nextDrag = { ...this._dragVol };
+        delete nextDrag[key];
+        clearTimeout(this._dragTimers[key]);
+        delete this._dragTimers[key];
+      }
+    }
+    if (nextDrag) this._dragVol = nextDrag;
+  }
 
   // ── Derived state from hass ───────────────────────────────────────
   private _state(id: string): MediaPlayerState | undefined {
@@ -126,6 +175,12 @@ export class WallPanelSonosCard extends LitElement implements LovelaceCard {
     this._menuOpen = false;
     Svc.joinGroup(this.hass, primary, entities.slice(1));
   }
+  private _onPlayPause(currentlyPlaying: boolean) {
+    // Flip the icon immediately so the press feels responsive — willUpdate
+    // clears this once hass reports the actual new state.
+    this._optimisticPlaying = !currentlyPlaying;
+    Svc.playPause(this.hass, this._activeRoom);
+  }
   private _toggleInGroup(id: string) {
     if (id === this._activeRoom) return;
     const cur = this._groupMembers();
@@ -134,6 +189,11 @@ export class WallPanelSonosCard extends LitElement implements LovelaceCard {
   }
   private _slide(e: PointerEvent, onChange: (v: number) => void, key?: string) {
     const el = e.currentTarget as HTMLElement;
+    // Cancel any post-release latch from a prior drag of the same slider.
+    if (key && this._dragTimers[key]) {
+      clearTimeout(this._dragTimers[key]);
+      delete this._dragTimers[key];
+    }
     const update = (ev: PointerEvent) => {
       const r = el.getBoundingClientRect();
       const v = Math.max(0, Math.min(100, Math.round(((ev.clientX - r.left) / r.width) * 100)));
@@ -148,10 +208,18 @@ export class WallPanelSonosCard extends LitElement implements LovelaceCard {
       el.removeEventListener("pointerup", up);
       el.removeEventListener("pointercancel", up);
       try { el.releasePointerCapture(e.pointerId); } catch { /* noop */ }
-      if (key && key in this._dragVol) {
-        const next = { ...this._dragVol };
-        delete next[key];
-        this._dragVol = next;
+      // Hold the optimistic value while volume_set round-trips; willUpdate
+      // clears it as soon as hass reports back, otherwise the timer expires
+      // and we fall back to the live hass value.
+      if (key) {
+        this._dragTimers[key] = setTimeout(() => {
+          delete this._dragTimers[key];
+          if (key in this._dragVol) {
+            const next = { ...this._dragVol };
+            delete next[key];
+            this._dragVol = next;
+          }
+        }, 2000);
       }
     };
     el.addEventListener("pointermove", move);
@@ -210,11 +278,20 @@ export class WallPanelSonosCard extends LitElement implements LovelaceCard {
   private _renderPlayer(s: MediaPlayerState) {
     const a = s.attributes;
     const dur = a.media_duration ?? 0;
-    const pos = a.media_position ?? 0;
-    const playing = s.state === "playing";
+    const playing = this._optimisticPlaying ?? (s.state === "playing");
     const vol = Math.round((a.volume_level ?? 0) * 100);
-    const cover = a.entity_picture
-      ? `url(${a.entity_picture})`
+    // Interpolate position from the last hass snapshot. Sonos only pushes
+    // media_position on state change, so without this the bar would freeze.
+    const updatedAt = a.media_position_updated_at
+      ? new Date(a.media_position_updated_at).getTime()
+      : 0;
+    const elapsed = s.state === "playing" && updatedAt
+      ? Math.max(0, (this._now - updatedAt) / 1000)
+      : 0;
+    const rawPos = (a.media_position ?? 0) + elapsed;
+    const pos = dur > 0 ? Math.min(dur, rawPos) : rawPos;
+    const coverImage = a.entity_picture
+      ? `url("${a.entity_picture}")`
       : "linear-gradient(135deg, var(--wp-accent) 0%, var(--wp-card-2) 60%, var(--wp-bg) 100%)";
 
     return html`
@@ -223,7 +300,7 @@ export class WallPanelSonosCard extends LitElement implements LovelaceCard {
           ${a.source ? html`<span class="src-dot"></span>${a.source}` : nothing}
         </div>
         <div class="cover-wrap">
-          <div class="cover" style=${styleMap({ background: cover })}></div>
+          <div class="cover" style=${styleMap({ backgroundImage: coverImage })}></div>
         </div>
         <div class="meta">
           <div class="track">${a.media_title ?? "Nothing playing"}</div>
@@ -237,7 +314,7 @@ export class WallPanelSonosCard extends LitElement implements LovelaceCard {
         <div class="transport">
           <button class="t-btn" @click=${() => Svc.setVolume(this.hass, this._activeRoom, Math.max(0, vol - 5))}>${iconVolDown}</button>
           <button class="t-btn" @click=${() => Svc.prev(this.hass, this._activeRoom)}>${iconPrev}</button>
-          <button class="play-btn" @click=${() => Svc.playPause(this.hass, this._activeRoom)}>
+          <button class="play-btn" @click=${() => this._onPlayPause(playing)}>
             ${playing ? iconPause : iconPlay}
           </button>
           <button class="t-btn" @click=${() => Svc.next(this.hass, this._activeRoom)}>${iconNext}</button>
