@@ -32,7 +32,21 @@ export const cardStyles = css`
     --wp-radius-pill: 999px;
     --wp-track-scale: 1.15;
     --wp-vol-scale: 1.4;
+    /* Force the host to fill its container. Without this Lovelace
+       parents that use min-content sizing (some grid/stack layouts)
+       will let intrinsic content widths drive the card's width — so
+       a wider favorites row makes the whole card grow, and switching
+       back to the player view shrinks it again. */
     display: block;
+    width: 100%;
+    max-width: 100%;
+    box-sizing: border-box;
+  }
+  ha-card {
+    width: 100%;
+    max-width: 100%;
+    box-sizing: border-box;
+    overflow: hidden;
   }
   .root {
     background: var(--wp-card);
@@ -45,6 +59,10 @@ export const cardStyles = css`
     position: relative;
     box-shadow: var(--wp-shadow-card);
     height: 100%;
+    width: 100%;
+    max-width: 100%;
+    min-width: 0;
+    box-sizing: border-box;
     min-height: 600px;
   }
 
