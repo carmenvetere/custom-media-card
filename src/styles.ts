@@ -266,14 +266,18 @@ export const cardStyles = css`
     color: var(--wp-bg);
   }
   .fav-list {
-    display: grid;
-    grid-template-columns: 1fr;
+    display: flex;
+    flex-direction: column;
     gap: 8px;
     overflow-y: auto;
     flex: 1;
     padding-right: 4px;
+    /* Keep rows pinned to the top — without this, a short list would
+       distribute the cards across the full available height. */
+    align-content: flex-start;
   }
   .fav-item {
+    flex-shrink: 0;
     display: flex;
     align-items: center;
     gap: 14px;
@@ -331,13 +335,14 @@ export const cardStyles = css`
     text-align: right;
   }
   .grp-grid {
-    display: grid;
-    grid-template-columns: 1fr;
+    display: flex;
+    flex-direction: column;
     gap: 8px;
     overflow-y: auto;
     padding-right: 4px;
   }
   .grp-row {
+    flex-shrink: 0;
     display: flex;
     justify-content: space-between;
     align-items: center;
