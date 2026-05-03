@@ -351,7 +351,7 @@ export class WallPanelSonosCard extends LitElement implements LovelaceCard {
     const groupSize = this._groupMembers().length;
 
     return html`
-      <div class="pv">
+      <div class="pv pv-scroll">
         <div class="fav-target">
           Play to <b>${this._label(this._activeRoom)}${groupSize > 1 ? ` +${groupSize - 1}` : ""}</b>
         </div>
@@ -388,7 +388,7 @@ export class WallPanelSonosCard extends LitElement implements LovelaceCard {
     const allEntities = this._config.entities;
     const inGroup = (id: string) => groupMembers.includes(id);
     return html`
-      <div class="pv">
+      <div class="pv pv-scroll">
         <div class="grp-banner">
           <div style="min-width:0">
             <div class="lbl">Currently grouped</div>

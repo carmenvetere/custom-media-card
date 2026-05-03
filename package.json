@@ -1,6 +1,6 @@
 {
   "name": "wall-panel-sonos-card",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "A Sonos multi-room control card for Home Assistant, designed for wall-mounted tablets.",
   "private": true,
   "main": "dist/wall-panel-sonos-card.js",

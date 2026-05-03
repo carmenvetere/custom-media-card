@@ -1,7 +1,7 @@
 // Constants — palette mirrors the dark variant from the React mockup.
 // Exposed as CSS custom properties on the card root so themes can override.
 
-export const CARD_VERSION = "0.1.0";
+export const CARD_VERSION = "0.2.0";
 export const CARD_TAG = "wall-panel-sonos-card";
 export const EDITOR_TAG = "wall-panel-sonos-card-editor";
 
