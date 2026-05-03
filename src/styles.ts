@@ -308,6 +308,20 @@ export const cardStyles = css`
     font-size: 16px;
     font-weight: 500;
     text-align: left;
+    /* Contain long titles. Without min-width:0 on a flex container,
+       the inner text's intrinsic width forces the button wider than
+       its parent, so the row escapes to the right. */
+    width: 100%;
+    min-width: 0;
+    overflow: hidden;
+    box-sizing: border-box;
+  }
+  .fav-label {
+    flex: 1;
+    min-width: 0;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
   }
   .fav-art {
     width: 44px;
@@ -492,15 +506,14 @@ export const cardStyles = css`
   }
 
   /* MOBILE / NARROW */
-  /* Fill the viewport so the card behaves like a phone screen.
-     100dvh handles iOS Safari's address-bar resize correctly. */
-  :host([narrow]) {
-    height: 100dvh;
-  }
+  /* Fill the dashboard panel if Lovelace gives the card bounded height
+     (panel-mode dashboards do), otherwise fall back to the default
+     min-height so we don't overshoot the viewport in a regular
+     non-panel dashboard. We deliberately do *not* force 100dvh on the
+     host — that would push the card behind the HA app header. */
   :host([narrow]) ha-card,
   :host([narrow]) .root {
     height: 100%;
-    min-height: 0;
     border-radius: 0;
   }
   :host([narrow]) .hdr-title {
