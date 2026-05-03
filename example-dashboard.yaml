@@ -1,0 +1,83 @@
+# Drop-in dashboard example for a wall-mounted tablet running Home Assistant.
+# Pair with the existing scenes column on the left; this card lives on the right.
+
+views:
+  - title: Wall Panel
+    path: wall
+    type: panel
+    cards:
+      - type: horizontal-stack
+        cards:
+          # Left: scenes / quick actions (replace with your existing buttons)
+          - type: vertical-stack
+            cards:
+              - type: button
+                name: Morning
+                tap_action: { action: call-service, service: scene.turn_on, service_data: { entity_id: scene.morning } }
+              - type: button
+                name: Working
+                tap_action: { action: call-service, service: scene.turn_on, service_data: { entity_id: scene.working } }
+              - type: button
+                name: All Off
+                tap_action: { action: call-service, service: scene.turn_on, service_data: { entity_id: scene.all_off } }
+
+          # Right: the Sonos card
+          - type: custom:wall-panel-sonos-card
+            default_view: player
+            layout: wall
+            track_scale: 1.15
+            vol_bar_scale: 1.4
+            entities:
+              - media_player.living_room
+              - media_player.kitchen
+              - media_player.office
+              - media_player.deck
+              - media_player.pool
+              - media_player.primary_bedroom
+              - media_player.primary_bathroom
+              - media_player.gym
+              - media_player.mud_room
+              - media_player.media_room
+            groups:
+              - id: downstairs
+                label: Downstairs
+                entities:
+                  - media_player.living_room
+                  - media_player.kitchen
+                  - media_player.deck
+              - id: everywhere
+                label: Everywhere
+                entities:
+                  - media_player.living_room
+                  - media_player.kitchen
+                  - media_player.office
+                  - media_player.deck
+                  - media_player.pool
+                  - media_player.primary_bedroom
+                  - media_player.primary_bathroom
+                  - media_player.gym
+                  - media_player.mud_room
+                  - media_player.media_room
+              - id: outdoor
+                label: Outdoor
+                entities:
+                  - media_player.deck
+                  - media_player.pool
+            favorites:
+              - id: hotel_costes
+                name: Hotel Costes Radio
+                type: station
+                media_content_id: "FV:2/12"
+                media_content_type: favorite_item_id
+                art: "linear-gradient(135deg, #1a1a1a 0%, #6a4a2c 100%)"
+              - id: chill_mix
+                name: Chill Mix
+                type: playlist
+                media_content_id: "FV:2/8"
+                media_content_type: favorite_item_id
+                art: "linear-gradient(135deg, #6dbdb8 0%, #2c4a6e 100%)"
+              - id: dinner_jazz
+                name: Dinner Jazz
+                type: playlist
+                script: script.play_dinner_jazz
+                art: "linear-gradient(135deg, #3a2a1a 0%, #c89b5e 100%)"
