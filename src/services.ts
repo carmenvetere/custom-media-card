@@ -59,5 +59,9 @@ export const playMedia = (
     media_content_type,
   });
 
-export const fireScript = (hass: HomeAssistant, script_entity: string) =>
-  hass.callService("script", script_entity.replace("script.", ""), {});
+export const fireScript = (hass: HomeAssistant, script_entity: string) => {
+  const name = script_entity.startsWith("script.")
+    ? script_entity.slice("script.".length)
+    : script_entity;
+  return hass.callService("script", name, {});
+};

@@ -11,6 +11,7 @@ export default {
     file: "dist/wall-panel-sonos-card.js",
     format: "es",
     sourcemap: dev ? "inline" : false,
+    inlineDynamicImports: true,
   },
   plugins: [
     resolve(),

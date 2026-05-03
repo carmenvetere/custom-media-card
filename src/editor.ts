@@ -41,6 +41,9 @@ export class WallPanelSonosCardEditor
         <label>Media player entities (one per room)</label>
         <textarea rows="6" @change=${(e: Event) => {
           const lines = (e.target as HTMLTextAreaElement).value.split("\n").map(s => s.trim()).filter(Boolean);
+          // Don't dispatch an empty list — the card's setConfig would
+          // throw and put the editor into an error state mid-typing.
+          if (lines.length === 0) return;
           this._val("entities", lines);
         }}>${(this._config.entities ?? []).join("\n")}</textarea>
         <div class="help">Available: ${entityIds.slice(0, 5).join(", ")}${entityIds.length > 5 ? "…" : ""}</div>
