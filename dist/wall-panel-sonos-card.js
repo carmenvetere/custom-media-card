@@ -109,6 +109,10 @@ function t(t,e,i,s){var r,o=arguments.length,n=o<3?e:null===s?s=Object.getOwnPro
     flex: 1;
     padding: 0 22px 18px;
     min-height: 0;
+    /* Allow children to shrink below their intrinsic content width so
+       long titles inside .fav-item ellipsize instead of pushing the
+       whole row off the right edge on narrow viewports. */
+    min-width: 0;
   }
   .src {
     text-align: center;
@@ -287,6 +291,7 @@ function t(t,e,i,s){var r,o=arguments.length,n=o<3?e:null===s?s=Object.getOwnPro
     overflow-y: auto;
     flex: 1;
     padding-right: 4px;
+    min-width: 0;
     /* Keep rows pinned to the top — without this, a short list would
        distribute the cards across the full available height. */
     align-content: flex-start;
@@ -309,16 +314,19 @@ function t(t,e,i,s){var r,o=arguments.length,n=o<3?e:null===s?s=Object.getOwnPro
        the inner text's intrinsic width forces the button wider than
        its parent, so the row escapes to the right. */
     width: 100%;
+    max-width: 100%;
     min-width: 0;
     overflow: hidden;
     box-sizing: border-box;
   }
   .fav-label {
-    flex: 1;
+    flex: 1 1 0;
     min-width: 0;
+    max-width: 100%;
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
+    display: block;
   }
   .fav-art {
     width: 44px;
@@ -507,11 +515,13 @@ function t(t,e,i,s){var r,o=arguments.length,n=o<3?e:null===s?s=Object.getOwnPro
      (panel-mode dashboards do), otherwise fall back to the default
      min-height so we don't overshoot the viewport in a regular
      non-panel dashboard. We deliberately do *not* force 100dvh on the
-     host — that would push the card behind the HA app header. */
+     host — that would push the card behind the HA app header. We also
+     keep the rounded corners in narrow mode; users who want a true
+     edge-to-edge wall-tablet feel can override --wp-radius via theme
+     or card-mod. */
   :host([narrow]) ha-card,
   :host([narrow]) .root {
     height: 100%;
-    border-radius: 0;
   }
   :host([narrow]) .hdr-title {
     font-size: 19px;
