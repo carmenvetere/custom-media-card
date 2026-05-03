@@ -3,13 +3,13 @@ import { css } from "lit";
 
 export const cardStyles = css`
   :host {
-    --wp-text: #ffffff;
-    --wp-text-dim: rgba(255, 255, 255, 0.62);
+    --wp-text: var(--primary-text-color, #ffffff);
+    --wp-text-dim: var(--secondary-text-color, rgba(255, 255, 255, 0.62));
     --wp-bg: #1a1c1f;
-    --wp-card: #3a3d42;
-    --wp-card-2: #4a4d52;
-    --wp-accent: #8eb1bf;
-    --wp-accent-2: #8ba680;
+    --wp-card: var(--background-color, #3a3d42);
+    --wp-card-2: var(--background-color-2, #4a4d52);
+    --wp-accent: var(--accent-color, #8eb1bf);
+    --wp-accent-2: var(--accent-color-2, #8ba680);
     /* Translucent fills derived from the palette. Overrideable so a
        theme can re-tint pills/banners without touching the base colors. */
     --wp-overlay-soft: rgba(0, 0, 0, 0.18);
