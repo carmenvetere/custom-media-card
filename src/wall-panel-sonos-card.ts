@@ -44,6 +44,9 @@ export class WallPanelSonosCard extends LitElement implements LovelaceCard {
   @state() private _menuOpen = false;
   @state() private _favTab: "All" | "Playlists" | "Stations" | "Albums" = "All";
   @state() private _favQ = "";
+  // Per-entity slider value while a drag is in progress. Lets the knob
+  // track the user's finger instead of snapping back to the last hass value.
+  @state() private _dragVol: Record<string, number> = {};
 
   // Lovelace lifecycle
   static getStubConfig(): Partial<WallPanelSonosCardConfig> {
@@ -63,12 +66,19 @@ export class WallPanelSonosCard extends LitElement implements LovelaceCard {
     if (!config.entities || !Array.isArray(config.entities) || config.entities.length === 0) {
       throw new Error("wall-panel-sonos-card: 'entities' is required and must be a non-empty list of media_player entity IDs.");
     }
+    const firstInit = !this._config;
     this._config = config;
-    if (!this._activeRoom) this._activeRoom = config.entities[0];
-    if (config.default_view) this._view = config.default_view;
-    // Apply tweak CSS vars
-    this.style.setProperty("--wp-track-scale", String(config.track_scale ?? 1.15));
-    this.style.setProperty("--wp-vol-scale", String(config.vol_bar_scale ?? 1.4));
+    if (!this._activeRoom || !config.entities.includes(this._activeRoom)) {
+      this._activeRoom = config.entities[0];
+    }
+    // Only honor default_view on the initial setConfig — re-renders from
+    // dashboard edits / theme swaps shouldn't yank the user back from
+    // whatever view they navigated to.
+    if (firstInit && config.default_view) this._view = config.default_view;
+    const trackScale = Math.max(0.9, Math.min(1.6, config.track_scale ?? 1.15));
+    const volScale = Math.max(1, Math.min(2.5, config.vol_bar_scale ?? 1.4));
+    this.style.setProperty("--wp-track-scale", String(trackScale));
+    this.style.setProperty("--wp-vol-scale", String(volScale));
     if (config.layout === "mobile") this.setAttribute("narrow", "");
     else this.removeAttribute("narrow");
   }
@@ -101,10 +111,13 @@ export class WallPanelSonosCard extends LitElement implements LovelaceCard {
     else this._menuOpen = !this._menuOpen;
   }
   private _pickRoom(id: string) {
+    const cur = this._groupMembers();
     this._activeRoom = id;
     this._menuOpen = false;
-    // Solo: unjoin the room from its current group.
-    Svc.unjoin(this.hass, id);
+    // If the picked room is already grouped with the previously-active
+    // room, just switch the view — don't tear the group apart. Otherwise
+    // solo it (matches the dropdown's "pick a standalone room" intent).
+    if (!cur.includes(id)) Svc.unjoin(this.hass, id);
   }
   private _pickGroup(entities: string[]) {
     if (entities.length === 0) return;
@@ -119,19 +132,31 @@ export class WallPanelSonosCard extends LitElement implements LovelaceCard {
     if (cur.includes(id)) Svc.unjoin(this.hass, id);
     else Svc.joinGroup(this.hass, this._activeRoom, [...cur.filter(x => x !== this._activeRoom), id]);
   }
-  private _slide(e: PointerEvent, onChange: (v: number) => void) {
+  private _slide(e: PointerEvent, onChange: (v: number) => void, key?: string) {
     const el = e.currentTarget as HTMLElement;
     const update = (ev: PointerEvent) => {
       const r = el.getBoundingClientRect();
       const v = Math.max(0, Math.min(100, Math.round(((ev.clientX - r.left) / r.width) * 100)));
+      if (key) this._dragVol = { ...this._dragVol, [key]: v };
       onChange(v);
     };
-    el.setPointerCapture(e.pointerId);
+    try { el.setPointerCapture(e.pointerId); } catch { /* noop */ }
     update(e);
     const move = (ev: PointerEvent) => update(ev);
-    const up = () => { el.removeEventListener("pointermove", move); el.removeEventListener("pointerup", up); };
+    const up = () => {
+      el.removeEventListener("pointermove", move);
+      el.removeEventListener("pointerup", up);
+      el.removeEventListener("pointercancel", up);
+      try { el.releasePointerCapture(e.pointerId); } catch { /* noop */ }
+      if (key && key in this._dragVol) {
+        const next = { ...this._dragVol };
+        delete next[key];
+        this._dragVol = next;
+      }
+    };
     el.addEventListener("pointermove", move);
     el.addEventListener("pointerup", up);
+    el.addEventListener("pointercancel", up);
   }
 
   // ── Render ────────────────────────────────────────────────────────
@@ -190,7 +215,7 @@ export class WallPanelSonosCard extends LitElement implements LovelaceCard {
     const vol = Math.round((a.volume_level ?? 0) * 100);
     const cover = a.entity_picture
       ? `url(${a.entity_picture})`
-      : "linear-gradient(135deg, #6a4ec8 0%, #1e3a6e 60%, #0a1428 100%)";
+      : "linear-gradient(135deg, var(--wp-accent) 0%, var(--wp-card-2) 60%, var(--wp-bg) 100%)";
 
     return html`
       <div class="pv">
@@ -220,17 +245,18 @@ export class WallPanelSonosCard extends LitElement implements LovelaceCard {
         </div>
         <div class="vol-row">
           <span style="display:flex">${iconVol}</span>
-          ${this._slider(vol, v => Svc.setVolume(this.hass, this._activeRoom, v))}
+          ${this._slider(vol, v => Svc.setVolume(this.hass, this._activeRoom, v), this._activeRoom)}
         </div>
       </div>
     `;
   }
 
-  private _slider(value: number, onChange: (v: number) => void) {
+  private _slider(value: number, onChange: (v: number) => void, key?: string) {
+    const display = key && key in this._dragVol ? this._dragVol[key] : value;
     return html`
-      <div class="slider" @pointerdown=${(e: PointerEvent) => this._slide(e, onChange)}>
-        <div class="fill" style=${styleMap({ width: `${value}%` })}></div>
-        <div class="knob" style=${styleMap({ left: `${value}%` })}></div>
+      <div class="slider" @pointerdown=${(e: PointerEvent) => this._slide(e, onChange, key)}>
+        <div class="fill" style=${styleMap({ width: `${display}%` })}></div>
+        <div class="knob" style=${styleMap({ left: `${display}%` })}></div>
       </div>
     `;
   }
@@ -319,7 +345,7 @@ export class WallPanelSonosCard extends LitElement implements LovelaceCard {
               return html`
                 <div class="grp-vol-row">
                   <span class="name">${this._label(id)}${id === this._activeRoom ? html`<span style="color:var(--wp-accent)"> ·</span>` : nothing}</span>
-                  ${this._slider(v, vv => Svc.setVolume(this.hass, id, vv))}
+                  ${this._slider(v, vv => Svc.setVolume(this.hass, id, vv), id)}
                   <span class="val">${v}</span>
                 </div>
               `;
@@ -344,12 +370,17 @@ export class WallPanelSonosCard extends LitElement implements LovelaceCard {
               <span class="now-pill">NOW</span>
             </button>
           ` : nothing}
-          ${savedGroups.filter(g => [...g.entities].sort().join(",") !== currentSig).map(g => html`
-            <button class="menu-item" @click=${() => this._pickGroup(g.entities)}>
-              <span style="display:flex">${iconLink}</span>
-              <span style="flex:1">${g.label}</span>
-            </button>
-          `)}
+          ${savedGroups
+            .filter(g => {
+              const inConfig = g.entities.filter(e => this._config.entities.includes(e));
+              return [...inConfig].sort().join(",") !== currentSig;
+            })
+            .map(g => html`
+              <button class="menu-item" @click=${() => this._pickGroup(g.entities)}>
+                <span style="display:flex">${iconLink}</span>
+                <span style="flex:1">${g.label}</span>
+              </button>
+            `)}
           <div class="menu-section">Rooms</div>
           ${this._config.entities.map(id => {
             const isActive = id === this._activeRoom && groupMembers.length === 1;
