@@ -308,6 +308,20 @@ export const cardStyles = css`
     font-size: 16px;
     font-weight: 500;
     text-align: left;
+    /* Contain long titles. Without min-width:0 on a flex container,
+       the inner text's intrinsic width forces the button wider than
+       its parent, so the row escapes to the right. */
+    width: 100%;
+    min-width: 0;
+    overflow: hidden;
+    box-sizing: border-box;
+  }
+  .fav-label {
+    flex: 1;
+    min-width: 0;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
   }
   .fav-art {
     width: 44px;

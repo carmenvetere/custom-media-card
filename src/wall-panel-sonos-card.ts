@@ -41,6 +41,10 @@ export class WallPanelSonosCard extends LitElement implements LovelaceCard {
   @state() private _config!: WallPanelSonosCardConfig;
   @state() private _view: ViewName = "player";
   @state() private _activeRoom: string = "";
+  // Becomes true once the user manually picks a room (dropdown or
+  // Speakers view) — suppresses the one-shot auto-pick that lands on
+  // whatever's already playing when the card first sees hass.
+  private _userPickedRoom = false;
   @state() private _menuOpen = false;
   @state() private _favTab: "All" | "Playlists" | "Stations" | "Albums" = "All";
   @state() private _favQ = "";
@@ -113,6 +117,15 @@ export class WallPanelSonosCard extends LitElement implements LovelaceCard {
 
   willUpdate(changed: PropertyValues) {
     if (!changed.has("hass") || !this._config) return;
+    // One-shot: when hass first arrives, switch the active room to
+    // whatever's currently playing (largest group wins, then earliest
+    // in entities). After this, we never auto-switch again — manual
+    // picks own the selection.
+    if (!this._userPickedRoom) {
+      const best = this._pickActivePlayer();
+      if (best && best !== this._activeRoom) this._activeRoom = best;
+      this._userPickedRoom = true;
+    }
     // Clear the optimistic play state once hass reflects what we sent.
     if (this._optimisticPlaying !== null) {
       const real = this._state(this._activeRoom)?.state === "playing";
@@ -149,6 +162,25 @@ export class WallPanelSonosCard extends LitElement implements LovelaceCard {
     // Filter to only entities the card was configured with
     return m.filter(x => this._config.entities.includes(x));
   }
+  // Pick the entity that should be the default "active room" on first
+  // load: prefer the playing entity in the largest configured group;
+  // tiebreak by position in `entities`. Returns null when nothing is
+  // playing — caller falls back to the existing default.
+  private _pickActivePlayer(): string | null {
+    const ents = this._config.entities;
+    let best: { id: string; size: number; idx: number } | null = null;
+    for (let i = 0; i < ents.length; i++) {
+      const id = ents[i];
+      const st = this._state(id);
+      if (st?.state !== "playing") continue;
+      const members = st.attributes.group_members ?? [id];
+      const size = members.filter(m => ents.includes(m)).length;
+      if (!best || size > best.size || (size === best.size && i < best.idx)) {
+        best = { id, size, idx: i };
+      }
+    }
+    return best?.id ?? null;
+  }
 
   // ── Handlers ──────────────────────────────────────────────────────
   private _setView(v: ViewName) {
@@ -162,6 +194,7 @@ export class WallPanelSonosCard extends LitElement implements LovelaceCard {
   private _pickRoom(id: string) {
     const cur = this._groupMembers();
     this._activeRoom = id;
+    this._userPickedRoom = true;
     this._menuOpen = false;
     // If the picked room is already grouped with the previously-active
     // room, just switch the view — don't tear the group apart. Otherwise
@@ -172,6 +205,7 @@ export class WallPanelSonosCard extends LitElement implements LovelaceCard {
     if (entities.length === 0) return;
     const primary = entities[0];
     this._activeRoom = primary;
+    this._userPickedRoom = true;
     this._menuOpen = false;
     Svc.joinGroup(this.hass, primary, entities.slice(1));
   }
@@ -369,7 +403,7 @@ export class WallPanelSonosCard extends LitElement implements LovelaceCard {
                 <span class="fav-art" style=${styleMap({ background: f.art ?? "linear-gradient(135deg,#4a5d72,#2a3540)" })}>
                   ${f.type === "station" ? iconStation : f.type === "album" ? iconAlbum : iconPlaylist}
                 </span>
-                <span style="flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${f.name}</span>
+                <span class="fav-label">${f.name}</span>
               </button>
             `)}
         </div>
