@@ -118,14 +118,21 @@ export const cardStyles = css`
     flex: 1;
     align-items: center;
     min-height: 0;
+    overflow: hidden;
+    padding: 4px 0;
   }
   .cover {
-    width: clamp(140px, 36vh, 240px);
     aspect-ratio: 1;
+    /* Drive size from height so the available vertical space is the cap.
+       max-width keeps the square from overflowing on narrow cards. */
+    height: clamp(140px, 36vh, 240px);
+    max-height: 100%;
+    max-width: 100%;
     border-radius: 18px;
     overflow: hidden;
     background-size: cover;
     background-position: center;
+    background-repeat: no-repeat;
     box-shadow: 0 8px 32px rgba(0, 0, 0, 0.35);
   }
   .meta {
