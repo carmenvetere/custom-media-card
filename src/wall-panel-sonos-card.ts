@@ -379,7 +379,14 @@ export class WallPanelSonosCard extends LitElement implements LovelaceCard {
     const coverImage = a.entity_picture
       ? `url("${a.entity_picture}")`
       : "linear-gradient(135deg, var(--wp-accent) 0%, var(--wp-card-2) 60%, var(--wp-bg) 100%)";
-    const trackTitle = this._loadingName ?? a.media_title ?? "Nothing playing";
+    // Sonos reports state="playing" with no media_title for TV, line-in,
+    // and some streaming sources, plus the brief window between tracks.
+    // Don't lie with "Nothing playing" while audio is coming out — fall
+    // back to whatever identifying info hass exposes.
+    const isPlaying = s.state === "playing";
+    const trackTitle = this._loadingName
+      ?? a.media_title
+      ?? (isPlaying ? (a.app_name ?? "Playing") : "Nothing playing");
     const trackSub = this._loadingName
       ? "Loading…"
       : `${a.media_artist ?? ""}${a.media_album_name ? ` · ${a.media_album_name}` : ""}`;

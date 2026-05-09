@@ -592,7 +592,7 @@ function t(t,e,i,s){var r,o=arguments.length,a=o<3?e:null===s?s=Object.getOwnPro
           ${Tt}
         </button>
       </div>
-    `}_renderPlayer(t){const e=t.attributes,i=e.media_duration??0,s=this._optimisticPlaying??"playing"===t.state,r=Math.round(100*(e.volume_level??0)),o=this._activeRoom,a=this._maxVol(),n=this._volStep(a),l=o in this._dragVol?this._dragVol[o]:r,c=e.media_position_updated_at?new Date(e.media_position_updated_at).getTime():0,d="playing"===t.state&&c?Math.max(0,(this._now-c)/1e3):0,h=(e.media_position??0)+d,p=i>0?Math.min(i,h):h,u=e.entity_picture?`url("${e.entity_picture}")`:"linear-gradient(135deg, var(--wp-accent) 0%, var(--wp-card-2) 60%, var(--wp-bg) 100%)",g=this._loadingName??e.media_title??"Nothing playing",v=this._loadingName?"Loading…":`${e.media_artist??""}${e.media_album_name?` · ${e.media_album_name}`:""}`;return W`
+    `}_renderPlayer(t){const e=t.attributes,i=e.media_duration??0,s=this._optimisticPlaying??"playing"===t.state,r=Math.round(100*(e.volume_level??0)),o=this._activeRoom,a=this._maxVol(),n=this._volStep(a),l=o in this._dragVol?this._dragVol[o]:r,c=e.media_position_updated_at?new Date(e.media_position_updated_at).getTime():0,d="playing"===t.state&&c?Math.max(0,(this._now-c)/1e3):0,h=(e.media_position??0)+d,p=i>0?Math.min(i,h):h,u=e.entity_picture?`url("${e.entity_picture}")`:"linear-gradient(135deg, var(--wp-accent) 0%, var(--wp-card-2) 60%, var(--wp-bg) 100%)",g="playing"===t.state,v=this._loadingName??e.media_title??(g?e.app_name??"Playing":"Nothing playing"),m=this._loadingName?"Loading…":`${e.media_artist??""}${e.media_album_name?` · ${e.media_album_name}`:""}`;return W`
       <div class="pv">
         <div class="src">
           ${e.source?W`<span class="src-dot"></span>${e.source}`:G}
@@ -601,8 +601,8 @@ function t(t,e,i,s){var r,o=arguments.length,a=o<3?e:null===s?s=Object.getOwnPro
           <div class="cover" style=${yt({backgroundImage:u})}></div>
         </div>
         <div class="meta">
-          <div class="track">${g}</div>
-          <div class="sub">${v}</div>
+          <div class="track">${v}</div>
+          <div class="sub">${m}</div>
         </div>
         <div class="progress">
           <span>${Ft(p)}</span>
