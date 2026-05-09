@@ -19,6 +19,10 @@ export interface WallPanelSonosCardConfig extends LovelaceCardConfig {
   // Visual tweaks
   track_scale?: number; // 0.9 - 1.6
   vol_bar_scale?: number; // 1 - 2.5
+  // Cap the slider's effective range. With max_volume: 40, the slider
+  // travels 0..40 instead of 0..100, giving 2.5× more resolution at
+  // the low end. The +/- buttons step proportionally.
+  max_volume?: number; // 1 - 100, default 100
   // 'wall' or 'mobile' — affects density / hides on-screen keyboard input.
   layout?: "wall" | "mobile";
 }

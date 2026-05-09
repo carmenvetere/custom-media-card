@@ -248,6 +248,18 @@ export const cardStyles = css`
     gap: 12px;
     padding: 2px 4px;
   }
+  .vol-icon {
+    display: flex;
+    flex-shrink: 0;
+  }
+  .vol-num {
+    flex-shrink: 0;
+    min-width: 28px;
+    text-align: right;
+    font-size: 14px;
+    font-variant-numeric: tabular-nums;
+    color: var(--wp-text-dim);
+  }
 
   /* SLIDER */
   .slider {

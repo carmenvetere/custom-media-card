@@ -56,6 +56,12 @@ export class WallPanelSonosCard extends LitElement implements LovelaceCard {
   // when hass state catches up. Avoids the perceived "lag" on the play
   // button while the media_player.media_play_pause call is in flight.
   @state() private _optimisticPlaying: boolean | null = null;
+  // When the user picks a favorite, show its name in the player view as
+  // "Loading…" until hass reports a track change. Without this the
+  // player view appears frozen on the previous track for a beat.
+  @state() private _loadingName: string | null = null;
+  private _loadingTimer?: ReturnType<typeof setTimeout>;
+  private _prevTitle: string | undefined;
   // Wall-clock used to interpolate media_position between hass updates.
   // Bumped every 500ms while a track is playing.
   @state() private _now = Date.now();
@@ -111,6 +117,7 @@ export class WallPanelSonosCard extends LitElement implements LovelaceCard {
   disconnectedCallback() {
     super.disconnectedCallback();
     if (this._tickHandle) clearInterval(this._tickHandle);
+    if (this._loadingTimer) clearTimeout(this._loadingTimer);
     for (const t of Object.values(this._dragTimers)) clearTimeout(t);
     this._dragTimers = {};
   }
@@ -130,6 +137,16 @@ export class WallPanelSonosCard extends LitElement implements LovelaceCard {
     if (this._optimisticPlaying !== null) {
       const real = this._state(this._activeRoom)?.state === "playing";
       if (real === this._optimisticPlaying) this._optimisticPlaying = null;
+    }
+    // Clear the favorite "Loading…" overlay as soon as the track title
+    // changes (Sonos has actually switched). Falls back to the 8s timer
+    // we set in _playFavorite if the title never changes.
+    if (this._loadingName !== null) {
+      const cur = this._state(this._activeRoom)?.attributes.media_title;
+      if (cur && cur !== this._prevTitle) {
+        this._loadingName = null;
+        if (this._loadingTimer) { clearTimeout(this._loadingTimer); this._loadingTimer = undefined; }
+      }
     }
     // Clear post-release volume latches whose hass value has caught up.
     // Active drags don't have a timer entry yet, so they're left alone.
@@ -221,18 +238,43 @@ export class WallPanelSonosCard extends LitElement implements LovelaceCard {
     if (cur.includes(id)) Svc.unjoin(this.hass, id);
     else Svc.joinGroup(this.hass, this._activeRoom, [...cur.filter(x => x !== this._activeRoom), id]);
   }
-  private _slide(e: PointerEvent, onChange: (v: number) => void, key?: string) {
+  private _slide(e: PointerEvent, max: number, onChange: (v: number) => void, key?: string) {
     const el = e.currentTarget as HTMLElement;
     // Cancel any post-release latch from a prior drag of the same slider.
     if (key && this._dragTimers[key]) {
       clearTimeout(this._dragTimers[key]);
       delete this._dragTimers[key];
     }
+    // Throttle service calls during drag. pointermove fires ~60×/s on most
+    // hardware; without this we'd flood HA → Sonos with volume_set calls
+    // and the queue would lag behind the user's finger.
+    const SEND_INTERVAL_MS = 120;
+    let lastSent = 0;
+    let pending: number | null = null;
+    let pendingTimer: ReturnType<typeof setTimeout> | null = null;
+    const sendNow = (v: number) => {
+      lastSent = Date.now();
+      pending = null;
+      if (pendingTimer) { clearTimeout(pendingTimer); pendingTimer = null; }
+      onChange(v);
+    };
     const update = (ev: PointerEvent) => {
       const r = el.getBoundingClientRect();
-      const v = Math.max(0, Math.min(100, Math.round(((ev.clientX - r.left) / r.width) * 100)));
+      const ratio = Math.max(0, Math.min(1, (ev.clientX - r.left) / r.width));
+      const v = Math.round(ratio * max);
       if (key) this._dragVol = { ...this._dragVol, [key]: v };
-      onChange(v);
+      const since = Date.now() - lastSent;
+      if (since >= SEND_INTERVAL_MS) {
+        sendNow(v);
+      } else {
+        pending = v;
+        if (!pendingTimer) {
+          pendingTimer = setTimeout(() => {
+            pendingTimer = null;
+            if (pending !== null) sendNow(pending);
+          }, SEND_INTERVAL_MS - since);
+        }
+      }
     };
     try { el.setPointerCapture(e.pointerId); } catch { /* noop */ }
     update(e);
@@ -242,6 +284,10 @@ export class WallPanelSonosCard extends LitElement implements LovelaceCard {
       el.removeEventListener("pointerup", up);
       el.removeEventListener("pointercancel", up);
       try { el.releasePointerCapture(e.pointerId); } catch { /* noop */ }
+      // Always commit the final value so the actual volume matches where
+      // the user released the knob, regardless of throttling.
+      if (pending !== null) sendNow(pending);
+      if (pendingTimer) { clearTimeout(pendingTimer); pendingTimer = null; }
       // Hold the optimistic value while volume_set round-trips; willUpdate
       // clears it as soon as hass reports back, otherwise the timer expires
       // and we fall back to the live hass value.
@@ -313,7 +359,13 @@ export class WallPanelSonosCard extends LitElement implements LovelaceCard {
     const a = s.attributes;
     const dur = a.media_duration ?? 0;
     const playing = this._optimisticPlaying ?? (s.state === "playing");
-    const vol = Math.round((a.volume_level ?? 0) * 100);
+    const realVol = Math.round((a.volume_level ?? 0) * 100);
+    const room = this._activeRoom;
+    const maxVol = this._maxVol();
+    const step = this._volStep(maxVol);
+    // While a drag/step is latched, show the optimistic value instead
+    // of waiting for hass to round-trip — feels much more responsive.
+    const vol = room in this._dragVol ? this._dragVol[room] : realVol;
     // Interpolate position from the last hass snapshot. Sonos only pushes
     // media_position on state change, so without this the bar would freeze.
     const updatedAt = a.media_position_updated_at
@@ -327,6 +379,10 @@ export class WallPanelSonosCard extends LitElement implements LovelaceCard {
     const coverImage = a.entity_picture
       ? `url("${a.entity_picture}")`
       : "linear-gradient(135deg, var(--wp-accent) 0%, var(--wp-card-2) 60%, var(--wp-bg) 100%)";
+    const trackTitle = this._loadingName ?? a.media_title ?? "Nothing playing";
+    const trackSub = this._loadingName
+      ? "Loading…"
+      : `${a.media_artist ?? ""}${a.media_album_name ? ` · ${a.media_album_name}` : ""}`;
 
     return html`
       <div class="pv">
@@ -337,8 +393,8 @@ export class WallPanelSonosCard extends LitElement implements LovelaceCard {
           <div class="cover" style=${styleMap({ backgroundImage: coverImage })}></div>
         </div>
         <div class="meta">
-          <div class="track">${a.media_title ?? "Nothing playing"}</div>
-          <div class="sub">${a.media_artist ?? ""}${a.media_album_name ? ` · ${a.media_album_name}` : ""}</div>
+          <div class="track">${trackTitle}</div>
+          <div class="sub">${trackSub}</div>
         </div>
         <div class="progress">
           <span>${fmt(pos)}</span>
@@ -346,28 +402,61 @@ export class WallPanelSonosCard extends LitElement implements LovelaceCard {
           <span>${fmt(dur)}</span>
         </div>
         <div class="transport">
-          <button class="t-btn" @click=${() => Svc.setVolume(this.hass, this._activeRoom, Math.max(0, vol - 5))}>${iconVolDown}</button>
+          <button class="t-btn" @click=${() => this._stepVol(-step, maxVol)}>${iconVolDown}</button>
           <button class="t-btn" @click=${() => Svc.prev(this.hass, this._activeRoom)}>${iconPrev}</button>
           <button class="play-btn" @click=${() => this._onPlayPause(playing)}>
             ${playing ? iconPause : iconPlay}
           </button>
           <button class="t-btn" @click=${() => Svc.next(this.hass, this._activeRoom)}>${iconNext}</button>
-          <button class="t-btn" @click=${() => Svc.setVolume(this.hass, this._activeRoom, Math.min(100, vol + 5))}>${iconVolUp}</button>
+          <button class="t-btn" @click=${() => this._stepVol(step, maxVol)}>${iconVolUp}</button>
         </div>
         <div class="vol-row">
-          <span style="display:flex">${iconVol}</span>
-          ${this._slider(vol, v => Svc.setVolume(this.hass, this._activeRoom, v), this._activeRoom)}
+          <span class="vol-icon">${iconVol}</span>
+          ${this._slider(vol, maxVol, v => Svc.setVolume(this.hass, this._activeRoom, v), this._activeRoom)}
+          <span class="vol-num">${vol}</span>
         </div>
       </div>
     `;
   }
 
-  private _slider(value: number, onChange: (v: number) => void, key?: string) {
+  private _maxVol(): number {
+    const m = this._config?.max_volume ?? 100;
+    return Math.max(1, Math.min(100, Math.round(m)));
+  }
+  private _volStep(max: number): number {
+    // Keep the +/- step proportional so the buttons are useful at any
+    // max_volume — about 5% of the range, never less than 1.
+    return Math.max(1, Math.round(max / 20));
+  }
+  private _stepVol(delta: number, max: number) {
+    const room = this._activeRoom;
+    const cur = room in this._dragVol
+      ? this._dragVol[room]
+      : Math.round((this._state(room)?.attributes.volume_level ?? 0) * 100);
+    const next = Math.max(0, Math.min(max, cur + delta));
+    if (next === cur) return;
+    // Optimistic latch so repeated taps feel instant + remain coherent
+    // even before hass round-trips the volume_set call.
+    this._dragVol = { ...this._dragVol, [room]: next };
+    if (this._dragTimers[room]) clearTimeout(this._dragTimers[room]);
+    this._dragTimers[room] = setTimeout(() => {
+      delete this._dragTimers[room];
+      if (room in this._dragVol) {
+        const nextDrag = { ...this._dragVol };
+        delete nextDrag[room];
+        this._dragVol = nextDrag;
+      }
+    }, 2000);
+    Svc.setVolume(this.hass, room, next);
+  }
+
+  private _slider(value: number, max: number, onChange: (v: number) => void, key?: string) {
     const display = key && key in this._dragVol ? this._dragVol[key] : value;
+    const pct = max > 0 ? Math.max(0, Math.min(100, (display / max) * 100)) : 0;
     return html`
-      <div class="slider" @pointerdown=${(e: PointerEvent) => this._slide(e, onChange, key)}>
-        <div class="fill" style=${styleMap({ width: `${display}%` })}></div>
-        <div class="knob" style=${styleMap({ left: `${display}%` })}></div>
+      <div class="slider" @pointerdown=${(e: PointerEvent) => this._slide(e, max, onChange, key)}>
+        <div class="fill" style=${styleMap({ width: `${pct}%` })}></div>
+        <div class="knob" style=${styleMap({ left: `${pct}%` })}></div>
       </div>
     `;
   }
@@ -415,6 +504,13 @@ export class WallPanelSonosCard extends LitElement implements LovelaceCard {
     if (f.script) Svc.fireScript(this.hass, f.script);
     else if (f.media_content_id && f.media_content_type)
       Svc.playMedia(this.hass, this._activeRoom, f.media_content_id, f.media_content_type);
+    // Capture the title that's playing right now so willUpdate can detect
+    // when Sonos has actually switched to the new track and clear the
+    // "Loading…" overlay. Safety-net timer also clears it after 8s.
+    this._prevTitle = this._state(this._activeRoom)?.attributes.media_title;
+    this._loadingName = f.name;
+    if (this._loadingTimer) clearTimeout(this._loadingTimer);
+    this._loadingTimer = setTimeout(() => { this._loadingName = null; }, 8000);
     this._view = "player";
   }
 
@@ -456,7 +552,7 @@ export class WallPanelSonosCard extends LitElement implements LovelaceCard {
               return html`
                 <div class="grp-vol-row">
                   <span class="name">${this._label(id)}${id === this._activeRoom ? html`<span style="color:var(--wp-accent)"> ·</span>` : nothing}</span>
-                  ${this._slider(v, vv => Svc.setVolume(this.hass, id, vv), id)}
+                  ${this._slider(v, 100, vv => Svc.setVolume(this.hass, id, vv), id)}
                   <span class="val">${v}</span>
                 </div>
               `;

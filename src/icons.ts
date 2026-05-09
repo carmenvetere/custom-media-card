@@ -8,9 +8,10 @@ export const iconSpeaker = svg`<svg width="20" height="22" viewBox="0 0 22 26" f
 
 export const iconChev = svg`<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9 L12 15 L18 9"/></svg>`;
 
-export const iconVolDown = svg`<svg width="22" height="22" viewBox="0 0 24 24" fill="currentColor"><path d="M3 9 V15 H7 L13 20 V4 L7 9 Z M16 10 H22 V14 H16 Z"/></svg>`;
-export const iconVolUp = svg`<svg width="22" height="22" viewBox="0 0 24 24" fill="currentColor"><path d="M3 9 V15 H7 L13 20 V4 L7 9 Z M16 10 H22 V14 H16 Z M19 7 V18 H21 V7 Z"/></svg>`;
-export const iconVol = svg`<svg width="22" height="22" viewBox="0 0 24 24" fill="currentColor"><path d="M3 9 V15 H7 L13 20 V4 L7 9 Z M16 8 C18 9 19 10.5 19 12 C19 13.5 18 15 16 16 V8 Z"/></svg>`;
+// Official MDI paths — visually balanced, match the rest of the HA icon set.
+export const iconVolDown = svg`<svg width="22" height="22" viewBox="0 0 24 24" fill="currentColor"><path d="M3 9V15H7L12 20V4L7 9H3M14 10.5H23V13.5H14V10.5Z"/></svg>`;
+export const iconVolUp = svg`<svg width="22" height="22" viewBox="0 0 24 24" fill="currentColor"><path d="M3 9V15H7L12 20V4L7 9H3M14 13.5V10.5H17V7.5H20V10.5H23V13.5H20V16.5H17V13.5H14Z"/></svg>`;
+export const iconVol = svg`<svg width="22" height="22" viewBox="0 0 24 24" fill="currentColor"><path d="M14,3.23V5.29C16.89,6.15 19,8.83 19,12C19,15.17 16.89,17.84 14,18.7V20.77C18,19.86 21,16.28 21,12C21,7.72 18,4.14 14,3.23M16.5,12C16.5,10.23 15.5,8.71 14,7.97V16C15.5,15.29 16.5,13.76 16.5,12M3 9H7L12 4V20L7 15H3V9Z"/></svg>`;
 
 export const iconPrev = svg`<svg width="24" height="24" viewBox="0 0 24 24" fill="currentColor"><path d="M6 5 H8 V19 H6 Z M9 12 L20 5 V19 Z"/></svg>`;
 export const iconNext = svg`<svg width="24" height="24" viewBox="0 0 24 24" fill="currentColor"><path d="M16 5 H18 V19 H16 Z M4 19 L15 12 L4 5 Z"/></svg>`;
