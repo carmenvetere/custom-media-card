@@ -89,6 +89,23 @@ favorites:
 | `track_scale` | number | no | `1.15` | Now-playing text scale (0.9–1.6) |
 | `vol_bar_scale` | number | no | `1.4` | Volume bar thickness (1.0–2.5) |
 | `max_volume` | number | no | `100` | Cap the slider's effective range (1–100). Set to e.g. `40` for finer control at low volumes — the slider then maps 0–100% width to 0–40 actual volume. The +/- buttons step proportionally (~5% of range, min 1). |
+| `station_art` | array | no | — | Cover art / labels for streaming sources HA exposes no metadata for (TuneIn, SiriusXM, Sonos Radio). See below. |
+
+### Station art
+
+HA's Sonos integration doesn't populate `media_title` or `entity_picture` for many streaming sources — the only identifying string is buried in `media_content_id` (e.g. `&source=TuneIn&...&stationId=s297990&...`). `station_art` lets you map a substring of `media_content_id` to a cover image and label.
+
+```yaml
+station_art:
+  - match: "stationId=s297990"   # case-insensitive substring of media_content_id
+    name: "MSNBC Now"
+    image: "https://upload.wikimedia.org/wikipedia/commons/1/15/MSNBC_2015_logo.svg"
+  - match: "source=SiriusXM"
+    name: "SiriusXM"
+    image: "https://example.com/siriusxm.png"
+```
+
+The first matching entry wins. To find the right `match` string, open Developer Tools → States while the station is playing and copy a stable substring out of `media_content_id`.
 
 ### Favorite item
 

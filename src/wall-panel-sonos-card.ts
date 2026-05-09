@@ -24,6 +24,7 @@ import type {
   ViewName,
   MediaPlayerState,
   FavoriteConfig,
+  StationArt,
 } from "./types";
 
 const fmt = (s: number) => {
@@ -192,6 +193,23 @@ export class WallPanelSonosCard extends LitElement implements LovelaceCard {
       if (att && (att.media_title || att.entity_picture)) return att;
     }
     return undefined;
+  }
+  // Look up a user-configured station_art entry by substring match
+  // against media_content_id. Used to surface art/labels for streaming
+  // sources HA doesn't populate metadata for (TuneIn, SiriusXM, etc.).
+  private _stationArt(contentId: string | undefined): StationArt | undefined {
+    if (!contentId || !this._config?.station_art?.length) return undefined;
+    const cid = contentId.toLowerCase();
+    return this._config.station_art.find(
+      e => e.match && cid.includes(e.match.toLowerCase()),
+    );
+  }
+  // Sonos buries the streaming service in the media_content_id query
+  // string when no `source` attribute is exposed (TuneIn radio, etc.).
+  private _sourceFromContentId(contentId: string | undefined): string | undefined {
+    if (!contentId) return undefined;
+    const m = contentId.match(/[?&]source=([^&]+)/i);
+    return m ? decodeURIComponent(m[1]) : undefined;
   }
   // Pick the entity that should be the default "active room" on first
   // load: prefer the playing entity in the largest configured group;
@@ -397,25 +415,33 @@ export class WallPanelSonosCard extends LitElement implements LovelaceCard {
       : 0;
     const rawPos = (meta.media_position ?? 0) + elapsed;
     const pos = dur > 0 ? Math.min(dur, rawPos) : rawPos;
-    const coverImage = meta.entity_picture
-      ? `url("${meta.entity_picture}")`
-      : "linear-gradient(135deg, var(--wp-accent) 0%, var(--wp-card-2) 60%, var(--wp-bg) 100%)";
+    const contentId = meta.media_content_id ?? a.media_content_id;
+    const station = this._stationArt(contentId);
+    const coverImage = station?.image
+      ? `url("${station.image}")`
+      : meta.entity_picture
+        ? `url("${meta.entity_picture}")`
+        : "linear-gradient(135deg, var(--wp-accent) 0%, var(--wp-card-2) 60%, var(--wp-bg) 100%)";
     // Sonos reports state="playing" with no media_title for TV, line-in,
-    // and some streaming sources, plus the brief window between tracks.
+    // and many streaming sources, plus the brief window between tracks.
     // Don't lie with "Nothing playing" while audio is coming out — fall
-    // back to whatever identifying info hass exposes.
+    // back to whatever identifying info we can scrape together.
     const isPlaying = s.state === "playing";
     const trackTitle = this._loadingName
       ?? meta.media_title
+      ?? station?.name
       ?? (isPlaying ? (meta.app_name ?? a.app_name ?? "Playing") : "Nothing playing");
     const trackSub = this._loadingName
       ? "Loading…"
       : `${meta.media_artist ?? ""}${meta.media_album_name ? ` · ${meta.media_album_name}` : ""}`;
+    // Surface the streaming service in the source line above the cover
+    // even when HA doesn't populate the `source` attribute (TuneIn etc.).
+    const sourceLabel = a.source ?? this._sourceFromContentId(contentId);
 
     return html`
       <div class="pv">
         <div class="src">
-          ${a.source ? html`<span class="src-dot"></span>${a.source}` : nothing}
+          ${sourceLabel ? html`<span class="src-dot"></span>${sourceLabel}` : nothing}
         </div>
         <div class="cover-wrap">
           <div class="cover" style=${styleMap({ backgroundImage: coverImage })}></div>

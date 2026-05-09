@@ -25,6 +25,22 @@ export interface WallPanelSonosCardConfig extends LovelaceCardConfig {
   max_volume?: number; // 1 - 100, default 100
   // 'wall' or 'mobile' — affects density / hides on-screen keyboard input.
   layout?: "wall" | "mobile";
+  // Map a media_content_id substring to a custom cover image and label.
+  // HA's Sonos integration exposes no art/title for many streaming
+  // sources (TuneIn, SiriusXM, Sonos Radio); this lets you supply both
+  // per station. First matching entry wins.
+  station_art?: StationArt[];
+}
+
+export interface StationArt {
+  // Case-insensitive substring matched against media_content_id.
+  // Pick something stable like "stationId=s297990" or "msnbc".
+  match: string;
+  // Cover image URL. Falls back to the default gradient if omitted.
+  image?: string;
+  // Title shown when the source doesn't expose media_title. Optional —
+  // omit to keep the card's normal fallback ("Playing", app_name, etc.).
+  name?: string;
 }
 
 export interface FavoriteConfig {
@@ -60,5 +76,6 @@ export interface MediaPlayerState {
     group_members?: string[];
     source?: string;
     app_name?: string;
+    media_content_id?: string;
   };
 }
