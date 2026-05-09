@@ -501,7 +501,13 @@ export class WallPanelSonosCard extends LitElement implements LovelaceCard {
   }
 
   private _playFavorite(f: FavoriteConfig) {
-    if (f.script) Svc.fireScript(this.hass, f.script);
+    if (f.script) Svc.fireScript(this.hass, f.script, {
+      // Pass the active room (and its current group) so the script can
+      // target whichever speaker the user is looking at, instead of
+      // hard-coding an entity per script.
+      entity_id: this._activeRoom,
+      group_members: this._groupMembers(),
+    });
     else if (f.media_content_id && f.media_content_type)
       Svc.playMedia(this.hass, this._activeRoom, f.media_content_id, f.media_content_type);
     // Capture the title that's playing right now so willUpdate can detect

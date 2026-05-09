@@ -98,7 +98,7 @@ favorites:
 | `name` | string | Display name |
 | `type` | `playlist` / `station` / `album` | Used for filtering and icon |
 | `media_content_id` + `media_content_type` | string | Played via `media_player.play_media` |
-| `script` | string | Alternative — fires a `script.*` entity |
+| `script` | string | Alternative — fires a `script.*` entity. The card passes `entity_id` (active room) and `group_members` (current group) as script fields so one script can target whichever room the user is on. |
 | `art` | string | CSS background (gradient or `url(...)`) |
 
 ## Theming

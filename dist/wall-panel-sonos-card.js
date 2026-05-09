@@ -2,9 +2,6 @@ function t(t,e,i,s){var r,o=arguments.length,a=o<3?e:null===s?s=Object.getOwnPro
   :host {
     --wp-text: var(--primary-text-color, #ffffff);
     --wp-text-dim: var(--secondary-text-color, rgba(255, 255, 255, 0.62));
-    /* Read --background-color first (Carmen's Wall Panel theme defines
-       it explicitly), then fall back to HA's standard names so the
-       card still picks up sane values under any other theme. */
     --wp-bg: var(--background-color, var(--primary-background-color, #1a1c1f));
     --wp-card: var(--background-color, var(--primary-background-color, var(--ha-card-background, var(--card-background-color, #3a3d42))));
     --wp-card-2: var(--secondary-background-color, #4a4d52);
@@ -654,7 +651,7 @@ function t(t,e,i,s){var r,o=arguments.length,a=o<3?e:null===s?s=Object.getOwnPro
             `)}
         </div>
       </div>
-    `}_playFavorite(t){var e,i,s,r;t.script?((t,e)=>{const i=e.startsWith("script.")?e.slice(7):e;t.callService("script",i,{})})(this.hass,t.script):t.media_content_id&&t.media_content_type&&(e=this.hass,i=this._activeRoom,s=t.media_content_id,r=t.media_content_type,e.callService("media_player","play_media",{entity_id:i,media_content_id:s,media_content_type:r})),this._prevTitle=this._state(this._activeRoom)?.attributes.media_title,this._loadingName=t.name,this._loadingTimer&&clearTimeout(this._loadingTimer),this._loadingTimer=setTimeout(()=>{this._loadingName=null},8e3),this._view="player"}_renderGrouping(t){const e=this._config.entities;return W`
+    `}_playFavorite(t){var e,i,s,r;t.script?((t,e,i={})=>{const s=e.startsWith("script.")?e.slice(7):e;t.callService("script",s,i)})(this.hass,t.script,{entity_id:this._activeRoom,group_members:this._groupMembers()}):t.media_content_id&&t.media_content_type&&(e=this.hass,i=this._activeRoom,s=t.media_content_id,r=t.media_content_type,e.callService("media_player","play_media",{entity_id:i,media_content_id:s,media_content_type:r})),this._prevTitle=this._state(this._activeRoom)?.attributes.media_title,this._loadingName=t.name,this._loadingTimer&&clearTimeout(this._loadingTimer),this._loadingTimer=setTimeout(()=>{this._loadingName=null},8e3),this._view="player"}_renderGrouping(t){const e=this._config.entities;return W`
       <div class="pv pv-scroll">
         <div class="grp-banner">
           <div style="min-width:0">
