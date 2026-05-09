@@ -88,6 +88,7 @@ favorites:
 | `layout` | string | no | `wall` | `wall` (no search input) / `mobile` |
 | `track_scale` | number | no | `1.15` | Now-playing text scale (0.9–1.6) |
 | `vol_bar_scale` | number | no | `1.4` | Volume bar thickness (1.0–2.5) |
+| `max_volume` | number | no | `100` | Cap the slider's effective range (1–100). Set to e.g. `40` for finer control at low volumes — the slider then maps 0–100% width to 0–40 actual volume. The +/- buttons step proportionally (~5% of range, min 1). |
 
 ### Favorite item
 
