@@ -179,6 +179,20 @@ export class WallPanelSonosCard extends LitElement implements LovelaceCard {
     // Filter to only entities the card was configured with
     return m.filter(x => this._config.entities.includes(x));
   }
+  // Find a group member whose attributes carry the actual playing track
+  // metadata (HA's Sonos integration only populates these on the
+  // coordinator). Returns undefined if no member has metadata.
+  private _coordinatorMeta(
+    members: string[] | undefined,
+  ): MediaPlayerState["attributes"] | undefined {
+    if (!members) return undefined;
+    for (const id of members) {
+      if (id === this._activeRoom) continue;
+      const att = this._state(id)?.attributes;
+      if (att && (att.media_title || att.entity_picture)) return att;
+    }
+    return undefined;
+  }
   // Pick the entity that should be the default "active room" on first
   // load: prefer the playing entity in the largest configured group;
   // tiebreak by position in `entities`. Returns null when nothing is
@@ -357,7 +371,14 @@ export class WallPanelSonosCard extends LitElement implements LovelaceCard {
 
   private _renderPlayer(s: MediaPlayerState) {
     const a = s.attributes;
-    const dur = a.media_duration ?? 0;
+    // HA's Sonos integration only populates media_title, entity_picture,
+    // artist/album, and position on the group coordinator — slaves report
+    // state="playing" with all metadata fields empty. Borrow the metadata
+    // from whichever group member actually has it.
+    const meta = (a.media_title || a.entity_picture)
+      ? a
+      : this._coordinatorMeta(a.group_members) ?? a;
+    const dur = meta.media_duration ?? 0;
     const playing = this._optimisticPlaying ?? (s.state === "playing");
     const realVol = Math.round((a.volume_level ?? 0) * 100);
     const room = this._activeRoom;
@@ -368,16 +389,16 @@ export class WallPanelSonosCard extends LitElement implements LovelaceCard {
     const vol = room in this._dragVol ? this._dragVol[room] : realVol;
     // Interpolate position from the last hass snapshot. Sonos only pushes
     // media_position on state change, so without this the bar would freeze.
-    const updatedAt = a.media_position_updated_at
-      ? new Date(a.media_position_updated_at).getTime()
+    const updatedAt = meta.media_position_updated_at
+      ? new Date(meta.media_position_updated_at).getTime()
       : 0;
     const elapsed = s.state === "playing" && updatedAt
       ? Math.max(0, (this._now - updatedAt) / 1000)
       : 0;
-    const rawPos = (a.media_position ?? 0) + elapsed;
+    const rawPos = (meta.media_position ?? 0) + elapsed;
     const pos = dur > 0 ? Math.min(dur, rawPos) : rawPos;
-    const coverImage = a.entity_picture
-      ? `url("${a.entity_picture}")`
+    const coverImage = meta.entity_picture
+      ? `url("${meta.entity_picture}")`
       : "linear-gradient(135deg, var(--wp-accent) 0%, var(--wp-card-2) 60%, var(--wp-bg) 100%)";
     // Sonos reports state="playing" with no media_title for TV, line-in,
     // and some streaming sources, plus the brief window between tracks.
@@ -385,11 +406,11 @@ export class WallPanelSonosCard extends LitElement implements LovelaceCard {
     // back to whatever identifying info hass exposes.
     const isPlaying = s.state === "playing";
     const trackTitle = this._loadingName
-      ?? a.media_title
-      ?? (isPlaying ? (a.app_name ?? "Playing") : "Nothing playing");
+      ?? meta.media_title
+      ?? (isPlaying ? (meta.app_name ?? a.app_name ?? "Playing") : "Nothing playing");
     const trackSub = this._loadingName
       ? "Loading…"
-      : `${a.media_artist ?? ""}${a.media_album_name ? ` · ${a.media_album_name}` : ""}`;
+      : `${meta.media_artist ?? ""}${meta.media_album_name ? ` · ${meta.media_album_name}` : ""}`;
 
     return html`
       <div class="pv">
