@@ -59,5 +59,6 @@ export interface MediaPlayerState {
     entity_picture?: string;
     group_members?: string[];
     source?: string;
+    app_name?: string;
   };
 }
