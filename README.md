@@ -76,6 +76,28 @@ favorites:
     art: "linear-gradient(135deg, #00b3a4 0%, #f4d35e 100%)"
 ```
 
+## Companion: Sonos Mini Card
+
+The bundle also registers `custom:wall-panel-sonos-mini-card` — a compact "Now Playing" tile sized for a home dashboard alongside weather / scene cards. Hides itself entirely when no configured entity is playing or paused. Tapping the art / text / room label fires a navigate action so a tap takes you to the full card.
+
+```yaml
+type: custom:wall-panel-sonos-mini-card
+navigation_path: /lovelace/music
+volume_step: 5
+entities:
+  - media_player.living_room
+  - media_player.kitchen
+  - media_player.primary_bedroom
+# Optional — same shape as the full card. Duplicate the entries here if
+# you want the mini tile to show custom art for metadata-less streams.
+station_art:
+  - match: "stationId=s297990"
+    name: "MSNBC Now"
+    image: "https://upload.wikimedia.org/wikipedia/commons/1/15/MSNBC_2015_logo.svg"
+```
+
+The mini card uses the same metadata fallbacks as the full card: it borrows title/art from the group coordinator when the picked entity is a slave, extracts the streaming source from `media_content_id` when HA doesn't expose one, and respects `station_art` when supplied.
+
 ## Config reference
 
 | Key | Type | Required | Default | Description |

@@ -677,4 +677,9 @@ export class WallPanelSonosCard extends LitElement implements LovelaceCard {
   documentationURL: "https://github.com/your-org/wall-panel-sonos-card",
 });
 
+// Side-effect import: registers the mini card in the same bundle so a
+// single resource entry in Lovelace gives users both
+// `custom:wall-panel-sonos-card` and `custom:wall-panel-sonos-mini-card`.
+import "./mini-card";
+
 export { CARD_VERSION };
