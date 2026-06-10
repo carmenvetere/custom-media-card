@@ -7,7 +7,7 @@
 // looks right for grouped slaves and metadata-less streaming sources
 // (TuneIn, SiriusXM, Sonos Radio).
 
-import { LitElement, html, css } from "lit";
+import { LitElement, html, css, type PropertyValues } from "lit";
 import { customElement, property, state } from "lit/decorators.js";
 import { styleMap } from "lit/directives/style-map.js";
 import type { HomeAssistant, LovelaceCard } from "custom-card-helpers";
@@ -165,6 +165,19 @@ export class WallPanelSonosMiniCard extends LitElement implements LovelaceCard {
     this._config = config;
   }
   getCardSize() { return 2; }
+
+  // Skip renders when no configured Sonos entity actually changed —
+  // `hass` is mutated for every entity update across HA.
+  shouldUpdate(changed: PropertyValues): boolean {
+    if (changed.size > 1 || !changed.has("hass")) return true;
+    if (!this._config) return true;
+    const prev = changed.get("hass") as HomeAssistant | undefined;
+    if (!prev) return true;
+    for (const id of this._config.entities) {
+      if (prev.states[id] !== this.hass.states[id]) return true;
+    }
+    return false;
+  }
 
   private _state(id: string): MediaPlayerState | undefined {
     return this.hass?.states[id] as unknown as MediaPlayerState;

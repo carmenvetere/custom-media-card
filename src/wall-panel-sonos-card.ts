@@ -63,6 +63,11 @@ export class WallPanelSonosCard extends LitElement implements LovelaceCard {
   @state() private _loadingName: string | null = null;
   private _loadingTimer?: ReturnType<typeof setTimeout>;
   private _prevTitle: string | undefined;
+  // Same idea for the next/prev transport buttons — flip a flag the moment
+  // the user taps so the sub-line shows "Loading…" instead of staying on
+  // the stale artist/album until Sonos pushes the new track.
+  @state() private _skipping: boolean = false;
+  private _skipTimer?: ReturnType<typeof setTimeout>;
   // Wall-clock used to interpolate media_position between hass updates.
   // Bumped every 500ms while a track is playing.
   @state() private _now = Date.now();
@@ -109,9 +114,15 @@ export class WallPanelSonosCard extends LitElement implements LovelaceCard {
   connectedCallback() {
     super.connectedCallback();
     this._tickHandle = setInterval(() => {
-      // Only re-render the progress bar when there's something to advance.
+      // Only re-render the progress bar when there's something to advance
+      // *and* the tab is actually visible. Wall-mounted tablets often sit
+      // on a different dashboard tab for hours — rendering twice per
+      // second behind the scenes wastes CPU and battery.
+      if (document.visibilityState !== "visible") return;
+      if (this._view !== "player") return;
       const s = this._state(this._activeRoom);
-      if (s?.state === "playing" && this._view === "player") this._now = Date.now();
+      if (s?.state !== "playing") return;
+      this._now = Date.now();
     }, 500);
   }
 
@@ -119,8 +130,26 @@ export class WallPanelSonosCard extends LitElement implements LovelaceCard {
     super.disconnectedCallback();
     if (this._tickHandle) clearInterval(this._tickHandle);
     if (this._loadingTimer) clearTimeout(this._loadingTimer);
+    if (this._skipTimer) clearTimeout(this._skipTimer);
     for (const t of Object.values(this._dragTimers)) clearTimeout(t);
     this._dragTimers = {};
+  }
+
+  // Lit re-renders whenever any tracked property changes. `hass` updates
+  // every time *any* HA entity changes — dozens of times per second on a
+  // busy install. Skip the render when none of the entities we actually
+  // care about (the configured Sonos players) have a new state object.
+  shouldUpdate(changed: PropertyValues): boolean {
+    if (changed.size > 1 || !changed.has("hass")) return true;
+    if (!this._config) return true;
+    const prev = changed.get("hass") as HomeAssistant | undefined;
+    if (!prev) return true;
+    for (const id of this._config.entities) {
+      // HA hands out a new state object whenever an entity changes, so
+      // reference inequality is enough — no deep compare needed.
+      if (prev.states[id] !== this.hass.states[id]) return true;
+    }
+    return false;
   }
 
   willUpdate(changed: PropertyValues) {
@@ -147,6 +176,14 @@ export class WallPanelSonosCard extends LitElement implements LovelaceCard {
       if (cur && cur !== this._prevTitle) {
         this._loadingName = null;
         if (this._loadingTimer) { clearTimeout(this._loadingTimer); this._loadingTimer = undefined; }
+      }
+    }
+    // Same for the next/prev skip indicator.
+    if (this._skipping) {
+      const cur = this._state(this._activeRoom)?.attributes.media_title;
+      if (cur && cur !== this._prevTitle) {
+        this._skipping = false;
+        if (this._skipTimer) { clearTimeout(this._skipTimer); this._skipTimer = undefined; }
       }
     }
     // Clear post-release volume latches whose hass value has caught up.
@@ -263,6 +300,17 @@ export class WallPanelSonosCard extends LitElement implements LovelaceCard {
     // clears this once hass reports the actual new state.
     this._optimisticPlaying = !currentlyPlaying;
     Svc.playPause(this.hass, this._activeRoom);
+  }
+  private _onSkip(dir: "next" | "prev") {
+    // Snapshot the current title so willUpdate can detect when Sonos
+    // pushes the new track and clear the indicator. Bound the wait so a
+    // stalled service call doesn't leave "Loading…" stuck forever.
+    this._prevTitle = this._state(this._activeRoom)?.attributes.media_title;
+    this._skipping = true;
+    if (this._skipTimer) clearTimeout(this._skipTimer);
+    this._skipTimer = setTimeout(() => { this._skipping = false; }, 5000);
+    if (dir === "next") Svc.next(this.hass, this._activeRoom);
+    else Svc.prev(this.hass, this._activeRoom);
   }
   private _toggleInGroup(id: string) {
     if (id === this._activeRoom) return;
@@ -431,7 +479,7 @@ export class WallPanelSonosCard extends LitElement implements LovelaceCard {
       ?? meta.media_title
       ?? station?.name
       ?? (isPlaying ? (meta.app_name ?? a.app_name ?? "Playing") : "Nothing playing");
-    const trackSub = this._loadingName
+    const trackSub = (this._loadingName || this._skipping)
       ? "Loading…"
       : `${meta.media_artist ?? ""}${meta.media_album_name ? ` · ${meta.media_album_name}` : ""}`;
     // Surface the streaming service in the source line above the cover
@@ -457,11 +505,11 @@ export class WallPanelSonosCard extends LitElement implements LovelaceCard {
         </div>
         <div class="transport">
           <button class="t-btn" @click=${() => this._stepVol(-step, maxVol)}>${iconVolDown}</button>
-          <button class="t-btn" @click=${() => Svc.prev(this.hass, this._activeRoom)}>${iconPrev}</button>
+          <button class="t-btn" @click=${() => this._onSkip("prev")}>${iconPrev}</button>
           <button class="play-btn" @click=${() => this._onPlayPause(playing)}>
             ${playing ? iconPause : iconPlay}
           </button>
-          <button class="t-btn" @click=${() => Svc.next(this.hass, this._activeRoom)}>${iconNext}</button>
+          <button class="t-btn" @click=${() => this._onSkip("next")}>${iconNext}</button>
           <button class="t-btn" @click=${() => this._stepVol(step, maxVol)}>${iconVolUp}</button>
         </div>
         <div class="vol-row">
