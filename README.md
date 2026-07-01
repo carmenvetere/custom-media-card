@@ -164,15 +164,22 @@ Override any of the CSS custom properties via a `card-mod` block or a custom the
 --wp-pill-on-active     /* secondary pill over an accent surface */
 --wp-accent-soft        /* "in group" row tint — color-mix of --wp-accent */
 
-/* Shadows */
+/* Shadows — outer card + cover fall back to HA's --ha-card-box-shadow
+   when the theme sets one, so a theme with its own elevation shows through. */
 --wp-shadow-card
 --wp-shadow-cover
 --wp-shadow-play
 --wp-shadow-menu
 
-/* Geometry & scale */
---wp-radius
---wp-radius-pill
+/* Geometry — outer radius follows the HA theme's --ha-card-border-radius.
+   Interior tiles derive from two smaller stops so a theme aiming for a
+   flatter or more-rounded language can shift them independently. Pill
+   (999px) and round-button (50%) shapes stay hard-coded — they're
+   structural, not decorative. */
+--wp-radius            /* outer card, falls back to --ha-card-border-radius, 28px */
+--wp-radius-tile       /* cover, menu card, group volumes panel */
+--wp-radius-tile-sm    /* menu items, favorite art tile, banner */
+--wp-radius-pill       /* fav rows, group rows */
 --wp-track-scale
 --wp-vol-scale
 ```

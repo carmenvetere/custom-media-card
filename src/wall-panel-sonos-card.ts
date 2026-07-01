@@ -13,6 +13,7 @@ import type { HomeAssistant, LovelaceCard } from "custom-card-helpers";
 import { CARD_TAG, EDITOR_TAG, CARD_VERSION } from "./const";
 import { cardStyles } from "./styles";
 import * as Svc from "./services";
+import { cssUrl } from "./util";
 import {
   iconStar, iconSpeaker, iconChev, iconVol, iconVolUp, iconVolDown,
   iconPrev, iconNext, iconPlay, iconPause,
@@ -57,6 +58,7 @@ export class WallPanelSonosCard extends LitElement implements LovelaceCard {
   // when hass state catches up. Avoids the perceived "lag" on the play
   // button while the media_player.media_play_pause call is in flight.
   @state() private _optimisticPlaying: boolean | null = null;
+  private _optimisticPlayingTimer?: ReturnType<typeof setTimeout>;
   // When the user picks a favorite, show its name in the player view as
   // "Loading…" until hass reports a track change. Without this the
   // player view appears frozen on the previous track for a beat.
@@ -131,6 +133,7 @@ export class WallPanelSonosCard extends LitElement implements LovelaceCard {
     if (this._tickHandle) clearInterval(this._tickHandle);
     if (this._loadingTimer) clearTimeout(this._loadingTimer);
     if (this._skipTimer) clearTimeout(this._skipTimer);
+    if (this._optimisticPlayingTimer) clearTimeout(this._optimisticPlayingTimer);
     for (const t of Object.values(this._dragTimers)) clearTimeout(t);
     this._dragTimers = {};
   }
@@ -154,19 +157,28 @@ export class WallPanelSonosCard extends LitElement implements LovelaceCard {
 
   willUpdate(changed: PropertyValues) {
     if (!changed.has("hass") || !this._config) return;
-    // One-shot: when hass first arrives, switch the active room to
-    // whatever's currently playing (largest group wins, then earliest
-    // in entities). After this, we never auto-switch again — manual
-    // picks own the selection.
+    // One-shot: when hass first arrives *and* something is actually
+    // playing, switch the active room to that player. Only latch the
+    // flag once we've truly picked — otherwise loading the dashboard
+    // while everything is idle would freeze the default room forever
+    // and later playback wouldn't auto-focus.
     if (!this._userPickedRoom) {
       const best = this._pickActivePlayer();
-      if (best && best !== this._activeRoom) this._activeRoom = best;
-      this._userPickedRoom = true;
+      if (best) {
+        if (best !== this._activeRoom) this._activeRoom = best;
+        this._userPickedRoom = true;
+      }
     }
     // Clear the optimistic play state once hass reflects what we sent.
     if (this._optimisticPlaying !== null) {
       const real = this._state(this._activeRoom)?.state === "playing";
-      if (real === this._optimisticPlaying) this._optimisticPlaying = null;
+      if (real === this._optimisticPlaying) {
+        this._optimisticPlaying = null;
+        if (this._optimisticPlayingTimer) {
+          clearTimeout(this._optimisticPlayingTimer);
+          this._optimisticPlayingTimer = undefined;
+        }
+      }
     }
     // Clear the favorite "Loading…" overlay as soon as the track title
     // changes (Sonos has actually switched). Falls back to the 8s timer
@@ -297,8 +309,12 @@ export class WallPanelSonosCard extends LitElement implements LovelaceCard {
   }
   private _onPlayPause(currentlyPlaying: boolean) {
     // Flip the icon immediately so the press feels responsive — willUpdate
-    // clears this once hass reports the actual new state.
+    // clears this once hass reports the actual new state. Safety timeout
+    // covers the case where the service call fails or Sonos never
+    // reports the transition, so the icon can't get stuck lying.
     this._optimisticPlaying = !currentlyPlaying;
+    if (this._optimisticPlayingTimer) clearTimeout(this._optimisticPlayingTimer);
+    this._optimisticPlayingTimer = setTimeout(() => { this._optimisticPlaying = null; }, 5000);
     Svc.playPause(this.hass, this._activeRoom);
   }
   private _onSkip(dir: "next" | "prev") {
@@ -466,9 +482,9 @@ export class WallPanelSonosCard extends LitElement implements LovelaceCard {
     const contentId = meta.media_content_id ?? a.media_content_id;
     const station = this._stationArt(contentId);
     const coverImage = station?.image
-      ? `url("${station.image}")`
+      ? cssUrl(station.image)
       : meta.entity_picture
-        ? `url("${meta.entity_picture}")`
+        ? cssUrl(meta.entity_picture)
         : "linear-gradient(135deg, var(--wp-accent) 0%, var(--wp-card-2) 60%, var(--wp-bg) 100%)";
     // Sonos reports state="playing" with no media_title for TV, line-in,
     // and many streaming sources, plus the brief window between tracks.
