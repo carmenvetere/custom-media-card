@@ -18,7 +18,7 @@ import {
   iconStar, iconSpeaker, iconChev, iconVol, iconVolUp, iconVolDown,
   iconPrev, iconNext, iconPlay, iconPause,
   iconStation, iconAlbum, iconPlaylist,
-  iconLink, iconCheck, iconEq,
+  iconLink, iconCheck, iconEq, iconSearch, iconClose,
 } from "./icons";
 import type {
   WallPanelSonosCardConfig,
@@ -26,6 +26,7 @@ import type {
   MediaPlayerState,
   FavoriteConfig,
   StationArt,
+  SearchMediaResult,
 } from "./types";
 
 const fmt = (s: number) => {
@@ -75,6 +76,15 @@ export class WallPanelSonosCard extends LitElement implements LovelaceCard {
   // etc.). Auto-clears after 5s or on user dismiss.
   @state() private _toast: { message: string; kind: "error" } | null = null;
   private _toastTimer?: ReturnType<typeof setTimeout>;
+
+  // Search view state. The generation counter guards against races where
+  // a stale response arrives after the user has moved on to a new query.
+  @state() private _searchQ: string = "";
+  @state() private _searchResults: SearchMediaResult[] = [];
+  @state() private _searchLoading: boolean = false;
+  @state() private _searchError: string | null = null;
+  private _searchDebounce?: ReturnType<typeof setTimeout>;
+  private _searchGen: number = 0;
   // Wall-clock used to interpolate media_position between hass updates.
   // Bumped every 500ms while a track is playing.
   @state() private _now = Date.now();
@@ -140,6 +150,7 @@ export class WallPanelSonosCard extends LitElement implements LovelaceCard {
     if (this._skipTimer) clearTimeout(this._skipTimer);
     if (this._optimisticPlayingTimer) clearTimeout(this._optimisticPlayingTimer);
     if (this._toastTimer) clearTimeout(this._toastTimer);
+    if (this._searchDebounce) clearTimeout(this._searchDebounce);
     for (const t of Object.values(this._dragTimers)) clearTimeout(t);
     this._dragTimers = {};
   }
@@ -445,6 +456,7 @@ export class WallPanelSonosCard extends LitElement implements LovelaceCard {
     const groupSize = groupMembers.length;
     const titleText = this._view === "favorites" ? "Favorites"
       : this._view === "grouping" ? "Speakers"
+      : this._view === "search" ? "Search"
       : this._label(this._activeRoom);
 
     return html`
@@ -460,6 +472,7 @@ export class WallPanelSonosCard extends LitElement implements LovelaceCard {
           ` : nothing}
           ${this._view === "player" ? this._renderPlayer(s) : nothing}
           ${this._view === "favorites" ? this._renderFavorites() : nothing}
+          ${this._view === "search" ? this._renderSearch() : nothing}
           ${this._view === "grouping" ? this._renderGrouping(groupMembers) : nothing}
           ${this._menuOpen ? this._renderMenu(groupMembers) : nothing}
         </div>
@@ -468,6 +481,7 @@ export class WallPanelSonosCard extends LitElement implements LovelaceCard {
   }
 
   private _renderHeader(titleText: string, groupSize: number) {
+    const searchOn = this._config.search_enabled !== false;
     return html`
       <div class="hdr">
         <button class=${classMap({ "hdr-btn": true, active: this._view === "favorites" })}
@@ -482,6 +496,12 @@ export class WallPanelSonosCard extends LitElement implements LovelaceCard {
           ${this._view === "player"
             ? html`<span class=${classMap({ chev: true, up: this._menuOpen })}>${iconChev}</span>` : nothing}
         </button>
+        ${searchOn ? html`
+          <button class=${classMap({ "hdr-btn": true, active: this._view === "search" })}
+                  @click=${() => this._setView("search")} aria-label="Search">
+            ${iconSearch}
+          </button>
+        ` : nothing}
         <button class=${classMap({ "hdr-btn": true, active: this._view === "grouping" })}
                 @click=${() => this._setView("grouping")} aria-label="Speakers">
           ${iconSpeaker}
@@ -680,6 +700,110 @@ export class WallPanelSonosCard extends LitElement implements LovelaceCard {
     if (this._loadingTimer) clearTimeout(this._loadingTimer);
     this._loadingTimer = setTimeout(() => { this._loadingName = null; }, 8000);
     this._view = "player";
+  }
+
+  // ── Search ────────────────────────────────────────────────────────
+  private _onSearchInput(q: string) {
+    this._searchQ = q;
+    if (this._searchDebounce) clearTimeout(this._searchDebounce);
+    const trimmed = q.trim();
+    if (!trimmed) {
+      // Empty query — clear results, drop loading/error state, cancel
+      // any in-flight generation.
+      this._searchResults = [];
+      this._searchError = null;
+      this._searchLoading = false;
+      this._searchGen++;
+      return;
+    }
+    this._searchDebounce = setTimeout(() => this._runSearch(trimmed), 350);
+  }
+  private async _runSearch(q: string) {
+    const gen = ++this._searchGen;
+    this._searchLoading = true;
+    this._searchError = null;
+    try {
+      const results = await Svc.searchMedia(this.hass, this._activeRoom, q);
+      // Ignore late responses that no longer match the current query.
+      if (gen !== this._searchGen) return;
+      this._searchResults = results.slice(0, 60);
+    } catch (err) {
+      if (gen !== this._searchGen) return;
+      const msg = err instanceof Error ? err.message : String(err);
+      // The most common failure is search_media not being registered —
+      // older HA, or an integration that hasn't implemented it. Give a
+      // human hint rather than exposing the raw jsonrpc error.
+      this._searchError = /unknown_service|not\s*found/i.test(msg)
+        ? "Search not supported on this Home Assistant version."
+        : msg;
+      this._searchResults = [];
+    } finally {
+      if (gen === this._searchGen) this._searchLoading = false;
+    }
+  }
+  private _playSearchResult(r: SearchMediaResult) {
+    if (!r.media_content_id) return;
+    const type = r.media_content_type ?? r.media_class ?? "music";
+    this._svc(
+      Svc.playMedia(this.hass, this._activeRoom, r.media_content_id, type),
+      `Couldn't play "${r.title}"`,
+    );
+    this._prevTitle = this._state(this._activeRoom)?.attributes.media_title;
+    this._loadingName = r.title;
+    if (this._loadingTimer) clearTimeout(this._loadingTimer);
+    this._loadingTimer = setTimeout(() => { this._loadingName = null; }, 8000);
+    this._view = "player";
+  }
+  private _renderSearch() {
+    const groupSize = this._groupMembers().length;
+    const results = this._searchResults;
+    return html`
+      <div class="pv pv-scroll">
+        <div class="fav-target">
+          Play to <b>${this._label(this._activeRoom)}${groupSize > 1 ? ` +${groupSize - 1}` : ""}</b>
+        </div>
+        <div class="search-bar">
+          <span class="search-icon">${iconSearch}</span>
+          <input class="search-input" type="search"
+            .value=${this._searchQ}
+            placeholder="Search music, stations, podcasts…"
+            @input=${(e: Event) => this._onSearchInput((e.target as HTMLInputElement).value)}/>
+          ${this._searchQ ? html`
+            <button class="search-clear" aria-label="Clear"
+              @click=${() => this._onSearchInput("")}>${iconClose}</button>
+          ` : nothing}
+        </div>
+        <div class="search-list">
+          ${this._searchError
+            ? html`<div class="search-empty error">${this._searchError}</div>`
+            : this._searchLoading
+              ? html`<div class="search-empty">Searching…</div>`
+              : !this._searchQ
+                ? html`<div class="search-empty">Type to search across Sonos and connected services.</div>`
+                : results.length === 0
+                  ? html`<div class="search-empty">No results.</div>`
+                  : results.map(r => html`
+                    <button class="search-item" @click=${() => this._playSearchResult(r)}>
+                      <span class="search-art"
+                        style=${styleMap({ background: r.thumbnail
+                          ? cssUrl(r.thumbnail)
+                          : "linear-gradient(135deg, var(--wp-accent) 0%, var(--wp-card-2) 100%)" })}>
+                        ${r.thumbnail ? nothing : (
+                          r.media_class === "album" ? iconAlbum
+                          : r.media_class === "playlist" ? iconPlaylist
+                          : iconStation
+                        )}
+                      </span>
+                      <span class="search-label">
+                        <span class="search-title">${r.title}</span>
+                        <span class="search-sub">${r.media_class ?? r.media_content_type ?? ""}</span>
+                      </span>
+                    </button>
+                  `)
+          }
+        </div>
+      </div>
+    `;
   }
 
   private _renderGrouping(groupMembers: string[]) {

@@ -14,8 +14,12 @@ export interface WallPanelSonosCardConfig extends LovelaceCardConfig {
   // Optional list of favorites. If omitted, card will try
   // media_player/browse_media on the active entity.
   favorites?: FavoriteConfig[];
-  // Default view when card mounts. 'player' | 'favorites' | 'grouping'
-  default_view?: "player" | "favorites" | "grouping";
+  // Default view when card mounts. 'player' | 'favorites' | 'grouping' | 'search'
+  default_view?: "player" | "favorites" | "grouping" | "search";
+  // Show the Search view (backed by media_player.search_media, HA 2025.x+).
+  // Defaults to true. Set false on wall-panel installs where an on-screen
+  // keyboard prompt is undesirable.
+  search_enabled?: boolean;
   // Visual tweaks
   track_scale?: number; // 0.9 - 1.6
   vol_bar_scale?: number; // 1 - 2.5
@@ -56,7 +60,21 @@ export interface FavoriteConfig {
   art?: string;
 }
 
-export type ViewName = "player" | "favorites" | "grouping";
+export type ViewName = "player" | "favorites" | "grouping" | "search";
+
+// A single item returned by media_player/search_media. HA's shape is
+// permissive — some providers omit thumbnail, some omit content_type.
+// Kept loose so we don't reject valid responses from different backends.
+export interface SearchMediaResult {
+  title: string;
+  media_content_id: string;
+  media_content_type?: string;
+  media_class?: string;
+  thumbnail?: string;
+  can_play?: boolean;
+  can_expand?: boolean;
+  children_media_class?: string;
+}
 
 // HA media_player entity state shape (subset)
 export interface MediaPlayerState {

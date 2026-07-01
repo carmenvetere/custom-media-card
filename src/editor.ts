@@ -293,7 +293,7 @@ export class WallPanelSonosCardEditor
     <div class="row">
       <label>Default view</label>
       <select @change=${(e: Event) => this._val("default_view", (e.target as HTMLSelectElement).value as any)}>
-        ${["player","favorites","grouping"].map(v => html`
+        ${["player","favorites","search","grouping"].map(v => html`
           <option value=${v} ?selected=${this._config.default_view === v}>${v}</option>
         `)}
       </select>
@@ -304,6 +304,15 @@ export class WallPanelSonosCardEditor
         <option value="wall" ?selected=${(this._config.layout ?? "wall") === "wall"}>wall</option>
         <option value="mobile" ?selected=${this._config.layout === "mobile"}>mobile</option>
       </select>
+    </div>
+    <div class="row-inline">
+      <label style="flex:1">
+        <input type="checkbox"
+          ?checked=${this._config.search_enabled !== false}
+          @change=${(e: Event) => this._val("search_enabled", (e.target as HTMLInputElement).checked)}/>
+        Show Search view
+      </label>
+      <div class="help" style="flex:2">Uses <code>media_player.search_media</code> (HA 2025.x+). Disable if this card lives on a wall panel where you don't want a keyboard prompt.</div>
     </div>
     <div class="row">
       <label>Track text scale (0.9–1.6)</label>
