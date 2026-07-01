@@ -70,6 +70,11 @@ export class WallPanelSonosCard extends LitElement implements LovelaceCard {
   // the stale artist/album until Sonos pushes the new track.
   @state() private _skipping: boolean = false;
   private _skipTimer?: ReturnType<typeof setTimeout>;
+  // Transient error message shown across the top of the card when a
+  // service call fails (bad content_id, offline speaker, unknown script,
+  // etc.). Auto-clears after 5s or on user dismiss.
+  @state() private _toast: { message: string; kind: "error" } | null = null;
+  private _toastTimer?: ReturnType<typeof setTimeout>;
   // Wall-clock used to interpolate media_position between hass updates.
   // Bumped every 500ms while a track is playing.
   @state() private _now = Date.now();
@@ -134,8 +139,25 @@ export class WallPanelSonosCard extends LitElement implements LovelaceCard {
     if (this._loadingTimer) clearTimeout(this._loadingTimer);
     if (this._skipTimer) clearTimeout(this._skipTimer);
     if (this._optimisticPlayingTimer) clearTimeout(this._optimisticPlayingTimer);
+    if (this._toastTimer) clearTimeout(this._toastTimer);
     for (const t of Object.values(this._dragTimers)) clearTimeout(t);
     this._dragTimers = {};
+  }
+
+  // Small wrapper around Svc.* promises so a failing service call
+  // surfaces to the user as a banner instead of being swallowed by the
+  // console. Context describes what the user was trying to do so the
+  // message reads naturally ("Couldn't play Foo — …").
+  private _svc<T>(promise: Promise<T>, context: string): Promise<T | void> {
+    return promise.catch((err: unknown) => {
+      const detail = err instanceof Error ? err.message : String(err);
+      this._showToast(`${context} — ${detail}`);
+    });
+  }
+  private _showToast(message: string) {
+    this._toast = { message, kind: "error" };
+    if (this._toastTimer) clearTimeout(this._toastTimer);
+    this._toastTimer = setTimeout(() => { this._toast = null; }, 5000);
   }
 
   // Lit re-renders whenever any tracked property changes. `hass` updates
@@ -297,7 +319,7 @@ export class WallPanelSonosCard extends LitElement implements LovelaceCard {
     // If the picked room is already grouped with the previously-active
     // room, just switch the view — don't tear the group apart. Otherwise
     // solo it (matches the dropdown's "pick a standalone room" intent).
-    if (!cur.includes(id)) Svc.unjoin(this.hass, id);
+    if (!cur.includes(id)) this._svc(Svc.unjoin(this.hass, id), `Couldn't ungroup ${this._label(id)}`);
   }
   private _pickGroup(entities: string[]) {
     if (entities.length === 0) return;
@@ -305,7 +327,8 @@ export class WallPanelSonosCard extends LitElement implements LovelaceCard {
     this._activeRoom = primary;
     this._userPickedRoom = true;
     this._menuOpen = false;
-    Svc.joinGroup(this.hass, primary, entities.slice(1));
+    this._svc(Svc.joinGroup(this.hass, primary, entities.slice(1)),
+      `Couldn't create group "${this._label(primary)}"`);
   }
   private _onPlayPause(currentlyPlaying: boolean) {
     // Flip the icon immediately so the press feels responsive — willUpdate
@@ -315,7 +338,8 @@ export class WallPanelSonosCard extends LitElement implements LovelaceCard {
     this._optimisticPlaying = !currentlyPlaying;
     if (this._optimisticPlayingTimer) clearTimeout(this._optimisticPlayingTimer);
     this._optimisticPlayingTimer = setTimeout(() => { this._optimisticPlaying = null; }, 5000);
-    Svc.playPause(this.hass, this._activeRoom);
+    this._svc(Svc.playPause(this.hass, this._activeRoom),
+      `Couldn't ${currentlyPlaying ? "pause" : "resume"} ${this._label(this._activeRoom)}`);
   }
   private _onSkip(dir: "next" | "prev") {
     // Snapshot the current title so willUpdate can detect when Sonos
@@ -325,14 +349,22 @@ export class WallPanelSonosCard extends LitElement implements LovelaceCard {
     this._skipping = true;
     if (this._skipTimer) clearTimeout(this._skipTimer);
     this._skipTimer = setTimeout(() => { this._skipping = false; }, 5000);
-    if (dir === "next") Svc.next(this.hass, this._activeRoom);
-    else Svc.prev(this.hass, this._activeRoom);
+    const call = dir === "next"
+      ? Svc.next(this.hass, this._activeRoom)
+      : Svc.prev(this.hass, this._activeRoom);
+    this._svc(call, `Couldn't skip ${dir === "next" ? "forward" : "back"}`);
   }
   private _toggleInGroup(id: string) {
     if (id === this._activeRoom) return;
     const cur = this._groupMembers();
-    if (cur.includes(id)) Svc.unjoin(this.hass, id);
-    else Svc.joinGroup(this.hass, this._activeRoom, [...cur.filter(x => x !== this._activeRoom), id]);
+    if (cur.includes(id)) {
+      this._svc(Svc.unjoin(this.hass, id), `Couldn't remove ${this._label(id)} from the group`);
+    } else {
+      this._svc(
+        Svc.joinGroup(this.hass, this._activeRoom, [...cur.filter(x => x !== this._activeRoom), id]),
+        `Couldn't add ${this._label(id)} to the group`,
+      );
+    }
   }
   private _slide(e: PointerEvent, max: number, onChange: (v: number) => void, key?: string) {
     const el = e.currentTarget as HTMLElement;
@@ -419,6 +451,13 @@ export class WallPanelSonosCard extends LitElement implements LovelaceCard {
       <ha-card>
         <div class="root">
           ${this._renderHeader(titleText, groupSize)}
+          ${this._toast ? html`
+            <div class="toast ${this._toast.kind}" role="alert">
+              <span class="toast-msg">${this._toast.message}</span>
+              <button class="toast-x" aria-label="Dismiss"
+                @click=${() => { this._toast = null; if (this._toastTimer) clearTimeout(this._toastTimer); }}>×</button>
+            </div>
+          ` : nothing}
           ${this._view === "player" ? this._renderPlayer(s) : nothing}
           ${this._view === "favorites" ? this._renderFavorites() : nothing}
           ${this._view === "grouping" ? this._renderGrouping(groupMembers) : nothing}
@@ -619,15 +658,20 @@ export class WallPanelSonosCard extends LitElement implements LovelaceCard {
   }
 
   private _playFavorite(f: FavoriteConfig) {
-    if (f.script) Svc.fireScript(this.hass, f.script, {
-      // Pass the active room (and its current group) so the script can
-      // target whichever speaker the user is looking at, instead of
-      // hard-coding an entity per script.
-      entity_id: this._activeRoom,
-      group_members: this._groupMembers(),
-    });
-    else if (f.media_content_id && f.media_content_type)
-      Svc.playMedia(this.hass, this._activeRoom, f.media_content_id, f.media_content_type);
+    if (f.script) {
+      this._svc(Svc.fireScript(this.hass, f.script, {
+        // Pass the active room (and its current group) so the script can
+        // target whichever speaker the user is looking at, instead of
+        // hard-coding an entity per script.
+        entity_id: this._activeRoom,
+        group_members: this._groupMembers(),
+      }), `Couldn't run ${f.script} for "${f.name}"`);
+    } else if (f.media_content_id && f.media_content_type) {
+      this._svc(
+        Svc.playMedia(this.hass, this._activeRoom, f.media_content_id, f.media_content_type),
+        `Couldn't play "${f.name}"`,
+      );
+    }
     // Capture the title that's playing right now so willUpdate can detect
     // when Sonos has actually switched to the new track and clear the
     // "Loading…" overlay. Safety-net timer also clears it after 8s.

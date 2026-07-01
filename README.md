@@ -186,4 +186,4 @@ Override any of the CSS custom properties via a `card-mod` block or a custom the
 
 ## Status
 
-v0.1.0 — initial release. Visual editor covers core fields; `favorites` / `groups` still YAML-only.
+Visual editor now covers rooms, options, favorites, groups, and station art — YAML remains a fully supported path for power users. Service-call failures (bad `media_content_id`, unknown script, offline speaker) surface as a red banner at the top of the card for 5 seconds.
