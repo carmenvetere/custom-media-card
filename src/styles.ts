@@ -23,12 +23,21 @@ export const cardStyles = css`
        back via the second declaration for the rare browser without it. */
     --wp-accent-soft: rgba(142, 177, 191, 0.45);
     --wp-accent-soft: color-mix(in srgb, var(--wp-accent) 45%, transparent);
-    /* Shadows */
-    --wp-shadow-card: 0 8px 32px rgba(0, 0, 0, 0.18);
-    --wp-shadow-cover: 0 8px 32px rgba(0, 0, 0, 0.35);
+    /* Shadows. Card + cover fall back to the HA theme's --ha-card-box-shadow
+       so a theme with a distinctive elevation shows through; the pixel
+       defaults keep the current look when no theme sets it. */
+    --wp-shadow-card: var(--ha-card-box-shadow, 0 8px 32px rgba(0, 0, 0, 0.18));
+    --wp-shadow-cover: var(--ha-card-box-shadow, 0 8px 32px rgba(0, 0, 0, 0.35));
     --wp-shadow-play: 0 4px 16px rgba(0, 0, 0, 0.25);
     --wp-shadow-menu: 0 16px 40px rgba(0, 0, 0, 0.5);
-    --wp-radius: 28px;
+    /* Radii. Outer card follows the HA theme's --ha-card-border-radius;
+       interior tiles derive from two smaller stops. Themes wanting a
+       consistent rounded-rectangle language can override any of these
+       independently. Pill (999px) and round (50%) shapes stay hard-coded
+       — those are structural, not decorative. */
+    --wp-radius: var(--ha-card-border-radius, 28px);
+    --wp-radius-tile: 18px;
+    --wp-radius-tile-sm: 12px;
     --wp-radius-pill: 999px;
     --wp-track-scale: 1.15;
     --wp-vol-scale: 1.4;
@@ -103,7 +112,7 @@ export const cardStyles = css`
     font-size: 23px;
     font-weight: 600;
     padding: 6px 12px;
-    border-radius: 14px;
+    border-radius: var(--wp-radius-tile-sm);
     transition: background 0.15s;
   }
   .hdr-title.menu-open {
@@ -168,7 +177,7 @@ export const cardStyles = css`
     height: clamp(140px, 36vh, 240px);
     max-height: 100%;
     max-width: 100%;
-    border-radius: 18px;
+    border-radius: var(--wp-radius-tile);
     overflow: hidden;
     background-size: cover;
     background-position: center;
@@ -364,7 +373,7 @@ export const cardStyles = css`
   .fav-art {
     width: 44px;
     height: 44px;
-    border-radius: 8px;
+    border-radius: var(--wp-radius-tile-sm);
     flex-shrink: 0;
     background-size: cover;
     background-position: center;
@@ -381,7 +390,7 @@ export const cardStyles = css`
     align-items: center;
     padding: 10px 14px;
     background: var(--wp-overlay);
-    border-radius: 14px;
+    border-radius: var(--wp-radius-tile-sm);
     margin-bottom: 12px;
     gap: 14px;
   }
@@ -449,7 +458,7 @@ export const cardStyles = css`
     margin-top: 14px;
     padding: 14px 16px;
     background: var(--wp-overlay);
-    border-radius: 16px;
+    border-radius: var(--wp-radius-tile);
   }
   .grp-volumes-title {
     font-size: 11px;
@@ -493,7 +502,7 @@ export const cardStyles = css`
   .menu-card {
     width: min(92%, 380px);
     background: var(--wp-card-2);
-    border-radius: 18px;
+    border-radius: var(--wp-radius-tile);
     padding: 8px;
     box-shadow: var(--wp-shadow-menu);
     max-height: 80%;
@@ -517,7 +526,7 @@ export const cardStyles = css`
     color: var(--wp-text);
     border: 0;
     cursor: pointer;
-    border-radius: 12px;
+    border-radius: var(--wp-radius-tile-sm);
     font-size: 15px;
     font-weight: 500;
   }

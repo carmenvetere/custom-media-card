@@ -12,6 +12,7 @@ import { customElement, property, state } from "lit/decorators.js";
 import { styleMap } from "lit/directives/style-map.js";
 import type { HomeAssistant, LovelaceCard } from "custom-card-helpers";
 import * as Svc from "./services";
+import { cssUrl } from "./util";
 import {
   iconPlay, iconPause, iconNext, iconVolUp, iconVolDown, iconChev,
 } from "./icons";
@@ -47,7 +48,11 @@ export class WallPanelSonosMiniCard extends LitElement implements LovelaceCard {
       --wp-card: #3a3d42;
       --wp-divider: rgba(255, 255, 255, 0.1);
       --wp-btn-bg: rgba(255, 255, 255, 0.08);
-      --wp-radius: 28px;
+      /* Match the full card's theme hooks: outer radius + shadow follow
+         HA theme vars, with the previous pixel values as fallback. */
+      --wp-radius: var(--ha-card-border-radius, 28px);
+      --wp-radius-tile-sm: 10px;
+      --wp-shadow: var(--ha-card-box-shadow, 0 8px 32px rgba(0, 0, 0, 0.18));
       display: block;
     }
     .root {
@@ -56,7 +61,7 @@ export class WallPanelSonosMiniCard extends LitElement implements LovelaceCard {
       border-radius: var(--wp-radius);
       padding: 14px;
       font-family: var(--ha-card-header-font-family, sans-serif);
-      box-shadow: 0 8px 32px rgba(0, 0, 0, 0.18);
+      box-shadow: var(--wp-shadow);
     }
     .hdr {
       display: flex;
@@ -108,7 +113,7 @@ export class WallPanelSonosMiniCard extends LitElement implements LovelaceCard {
     .art {
       width: 52px;
       height: 52px;
-      border-radius: 10px;
+      border-radius: var(--wp-radius-tile-sm);
       flex-shrink: 0;
       background-size: cover;
       background-position: center;
@@ -238,9 +243,9 @@ export class WallPanelSonosMiniCard extends LitElement implements LovelaceCard {
     const vol = Math.round((a.volume_level ?? 0) * 100);
     const step = this._config.volume_step ?? 5;
     const cover = station?.image
-      ? `url("${station.image}")`
+      ? cssUrl(station.image)
       : meta.entity_picture
-        ? `url("${meta.entity_picture}")`
+        ? cssUrl(meta.entity_picture)
         : "linear-gradient(135deg, #6a4ec8 0%, #1e3a6e 60%, #0a1428 100%)";
     const title = meta.media_title
       ?? station?.name
