@@ -132,6 +132,38 @@ export const cardStyles = css`
     transform: rotate(180deg);
   }
 
+  /* TOAST — service-call failure banner. Auto-clears after 5s.
+     Kept inline in the .root flex flow so it pushes the view down
+     rather than covering the header. */
+  .toast {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin: 0 22px 8px;
+    padding: 10px 14px;
+    background: var(--error-color, #cf6679);
+    color: var(--wp-bg);
+    border-radius: var(--wp-radius-tile-sm);
+    font-size: 13px;
+    animation: toast-in 0.15s ease-out;
+  }
+  .toast-msg { flex: 1; min-width: 0; }
+  .toast-x {
+    background: none;
+    border: 0;
+    color: inherit;
+    font-size: 20px;
+    line-height: 1;
+    cursor: pointer;
+    padding: 0 4px;
+    opacity: 0.75;
+  }
+  .toast-x:hover { opacity: 1; }
+  @keyframes toast-in {
+    from { opacity: 0; transform: translateY(-4px); }
+    to   { opacity: 1; transform: translateY(0); }
+  }
+
   /* PLAYER */
   .pv {
     display: flex;
