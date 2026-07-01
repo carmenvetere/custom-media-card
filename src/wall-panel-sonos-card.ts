@@ -8,6 +8,7 @@ import { LitElement, html, nothing, type PropertyValues } from "lit";
 import { customElement, property, state } from "lit/decorators.js";
 import { classMap } from "lit/directives/class-map.js";
 import { styleMap } from "lit/directives/style-map.js";
+import { live } from "lit/directives/live.js";
 import type { HomeAssistant, LovelaceCard } from "custom-card-helpers";
 
 import { CARD_TAG, EDITOR_TAG, CARD_VERSION } from "./const";
@@ -484,10 +485,12 @@ export class WallPanelSonosCard extends LitElement implements LovelaceCard {
     const searchOn = this._config.search_enabled !== false;
     return html`
       <div class="hdr">
-        <button class=${classMap({ "hdr-btn": true, active: this._view === "favorites" })}
-                @click=${() => this._setView("favorites")} aria-label="Favorites">
-          ${iconStar}
-        </button>
+        <div class="hdr-side left">
+          <button class=${classMap({ "hdr-btn": true, active: this._view === "favorites" })}
+                  @click=${() => this._setView("favorites")} aria-label="Favorites">
+            ${iconStar}
+          </button>
+        </div>
         <button class=${classMap({ "hdr-title": true, "menu-open": this._menuOpen })}
                 @click=${this._onTitleClick}>
           <span>${titleText}</span>
@@ -496,16 +499,18 @@ export class WallPanelSonosCard extends LitElement implements LovelaceCard {
           ${this._view === "player"
             ? html`<span class=${classMap({ chev: true, up: this._menuOpen })}>${iconChev}</span>` : nothing}
         </button>
-        ${searchOn ? html`
-          <button class=${classMap({ "hdr-btn": true, active: this._view === "search" })}
-                  @click=${() => this._setView("search")} aria-label="Search">
-            ${iconSearch}
+        <div class="hdr-side right">
+          ${searchOn ? html`
+            <button class=${classMap({ "hdr-btn": true, active: this._view === "search" })}
+                    @click=${() => this._setView("search")} aria-label="Search">
+              ${iconSearch}
+            </button>
+          ` : nothing}
+          <button class=${classMap({ "hdr-btn": true, active: this._view === "grouping" })}
+                  @click=${() => this._setView("grouping")} aria-label="Speakers">
+            ${iconSpeaker}
           </button>
-        ` : nothing}
-        <button class=${classMap({ "hdr-btn": true, active: this._view === "grouping" })}
-                @click=${() => this._setView("grouping")} aria-label="Speakers">
-          ${iconSpeaker}
-        </button>
+        </div>
       </div>
     `;
   }
@@ -765,9 +770,10 @@ export class WallPanelSonosCard extends LitElement implements LovelaceCard {
         <div class="search-bar">
           <span class="search-icon">${iconSearch}</span>
           <input class="search-input" type="search"
-            .value=${this._searchQ}
+            .value=${live(this._searchQ)}
             placeholder="Search music, stations, podcasts…"
-            @input=${(e: Event) => this._onSearchInput((e.target as HTMLInputElement).value)}/>
+            @input=${(e: Event) => this._onSearchInput((e.target as HTMLInputElement).value)}
+            @keydown=${(e: KeyboardEvent) => e.stopPropagation()}/>
           ${this._searchQ ? html`
             <button class="search-clear" aria-label="Clear"
               @click=${() => this._onSearchInput("")}>${iconClose}</button>

@@ -75,15 +75,25 @@ export const cardStyles = css`
     min-height: 600px;
   }
 
-  /* HEADER */
+  /* HEADER
+     Grid with 1fr/auto/1fr guarantees the title stays dead-centered
+     regardless of how many buttons sit on either side. With plain flex
+     + space-between the title floated toward whichever side had fewer
+     buttons — visible as soon as the Search icon was added. */
   .hdr {
-    display: flex;
+    display: grid;
+    grid-template-columns: 1fr auto 1fr;
     align-items: center;
-    justify-content: space-between;
     gap: 10px;
     padding: 14px 18px 12px;
     flex-shrink: 0;
   }
+  .hdr-side {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .hdr-side.right { justify-content: flex-end; }
   .hdr-btn {
     width: 44px;
     height: 44px;

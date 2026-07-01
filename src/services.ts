@@ -76,10 +76,11 @@ export const fireScript = (
 // `return_response: true` and read the results directly, which the
 // classic callService signature doesn't expose.
 //
-// Response shape is nested under `response[entity_id]` — HA aggregates
-// per-target results even for a single-entity call. We defensively look
-// in both `response.<eid>` and the top level in case a future HA
-// version flattens it.
+// The response shape has moved around between HA versions:
+//   - {response: {<entity_id>: {result: [...]}}, context}
+//   - {response: {result: [...]}, context}
+//   - {result: [...]}
+// We try each shape defensively rather than assuming one.
 export const searchMedia = async (
   hass: HomeAssistant,
   entity_id: string,
@@ -91,13 +92,56 @@ export const searchMedia = async (
     domain: "media_player",
     service: "search_media",
     service_data: {
+      // Include entity_id in service_data as well as target — some
+      // HA versions bind on one, some on the other, both together works.
+      entity_id,
       search_query,
       ...(media_content_type ? { media_content_type } : {}),
     },
     target: { entity_id },
     return_response: true,
   });
-  const response = (raw?.response as Record<string, { result?: SearchMediaResult[] }> | undefined)
-    ?? (raw as Record<string, { result?: SearchMediaResult[] }>);
-  return response?.[entity_id]?.result ?? [];
+  const result = extractSearchResult(raw, entity_id);
+  if (!result.length) {
+    // Only when we came back empty — helps diagnose an unexpected shape
+    // without spamming the console on every successful search.
+    // eslint-disable-next-line no-console
+    console.debug("[wall-panel-sonos-card] search_media returned no items; raw response:", raw);
+  }
+  return result;
+};
+
+const extractSearchResult = (
+  raw: unknown,
+  entity_id: string,
+): SearchMediaResult[] => {
+  const arrayAt = (o: unknown): SearchMediaResult[] | null => {
+    const v = (o as { result?: unknown })?.result;
+    return Array.isArray(v) ? (v as SearchMediaResult[]) : null;
+  };
+  if (!raw || typeof raw !== "object") return [];
+  const r = raw as Record<string, unknown>;
+  // {result: [...]}
+  const flat = arrayAt(r);
+  if (flat) return flat;
+  // {response: ...}
+  const resp = r.response as Record<string, unknown> | undefined;
+  if (resp && typeof resp === "object") {
+    // {response: {result: [...]}}
+    const flatInResp = arrayAt(resp);
+    if (flatInResp) return flatInResp;
+    // {response: {<entity_id>: {result: [...]}}}
+    const perEntity = arrayAt(resp[entity_id]);
+    if (perEntity) return perEntity;
+    // {response: {<any-entity>: {result: [...]}}} — fall through to
+    // whichever key HA used if entity_id doesn't match verbatim.
+    for (const k of Object.keys(resp)) {
+      const v = arrayAt(resp[k]);
+      if (v) return v;
+    }
+  }
+  // {<entity_id>: {result: [...]}}
+  const perEntity = arrayAt(r[entity_id]);
+  if (perEntity) return perEntity;
+  return [];
 };
