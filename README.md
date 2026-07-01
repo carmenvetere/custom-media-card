@@ -5,7 +5,8 @@ A Sonos multi-room control card for Home Assistant, designed for wall-mounted ta
 ## Features
 
 - **Player view** — cover, track meta, transport, volume slider sized for finger touch
-- **Favorites view** — single-column list with category pills (no on-screen search to avoid keyboards on wall panels)
+- **Favorites view** — single-column list with category pills, curated via YAML or the visual editor
+- **Search view** — live query against `media_player.search_media` (HA 2025.x+); disable per-instance for wall panels where a keyboard prompt is unwelcome
 - **Speakers view** — tap to add/remove rooms from the current group, with per-room volume sliders for the group
 - **Header dropdown** — tap the room name to switch active speaker or jump to a saved group
 - **Tweakable** — track text size and volume bar thickness configurable per-instance
@@ -106,7 +107,8 @@ The mini card uses the same metadata fallbacks as the full card: it borrows titl
 | `names` | object | no | — | Map of `entity_id → friendly label` override |
 | `groups` | array | no | — | Saved groups shown in the room dropdown |
 | `favorites` | array | no | — | Items shown in the Favorites view |
-| `default_view` | string | no | `player` | `player` / `favorites` / `grouping` |
+| `default_view` | string | no | `player` | `player` / `favorites` / `search` / `grouping` |
+| `search_enabled` | boolean | no | `true` | Show the Search view in the header. Set `false` on wall-panel installs to avoid the on-screen keyboard prompt. Requires HA 2025.x for `media_player.search_media`. |
 | `layout` | string | no | `wall` | `wall` (no search input) / `mobile` |
 | `track_scale` | number | no | `1.15` | Now-playing text scale (0.9–1.6) |
 | `vol_bar_scale` | number | no | `1.4` | Volume bar thickness (1.0–2.5) |
