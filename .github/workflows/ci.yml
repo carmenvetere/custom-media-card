@@ -1,0 +1,45 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+# One in-progress run per branch/PR is plenty — cancel older ones when
+# a new commit lands so we don't queue up wasted work.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Typecheck + build
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Typecheck
+        run: npx tsc --noEmit
+
+      - name: Build
+        run: npm run build
+
+      # Verify the built bundle still registers both custom elements —
+      # a bad import order or a lost side-effect import would silently
+      # produce a bundle missing one of them, and neither typecheck nor
+      # rollup would fail on that.
+      - name: Verify bundle exports both cards
+        run: |
+          grep -q 'wall-panel-sonos-card' dist/wall-panel-sonos-card.js
+          grep -q 'wall-panel-sonos-mini-card' dist/wall-panel-sonos-card.js
