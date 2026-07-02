@@ -314,6 +314,15 @@ export class WallPanelSonosCardEditor
       </label>
       <div class="help" style="flex:2">Uses <code>media_player.search_media</code> (HA 2025.x+). Disable if this card lives on a wall panel where you don't want a keyboard prompt.</div>
     </div>
+    <div class="row-inline">
+      <label style="flex:1">
+        <input type="checkbox"
+          ?checked=${this._config.use_shared_store === true}
+          @change=${(e: Event) => this._val("use_shared_store", (e.target as HTMLInputElement).checked)}/>
+        Use shared store
+      </label>
+      <div class="help" style="flex:2">Read favorites, groups, and station art from the <code>wall_panel_sonos</code> integration (managed via the "Sonos Card" sidebar panel) instead of this card's own lists. The sections below become the fallback when the integration is unavailable.</div>
+    </div>
     <div class="row">
       <label>Track text scale (0.9–1.6)</label>
       <input type="number" min="0.9" max="1.6" step="0.05"

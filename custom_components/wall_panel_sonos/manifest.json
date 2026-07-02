@@ -1,0 +1,10 @@
+{
+  "domain": "wall_panel_sonos",
+  "name": "Wall Panel Sonos Card Store",
+  "version": "0.1.0",
+  "documentation": "https://github.com/carmenvetere/custom-media-card",
+  "issue_tracker": "https://github.com/carmenvetere/custom-media-card/issues",
+  "dependencies": ["http", "websocket_api", "panel_custom"],
+  "codeowners": ["@carmenvetere"],
+  "iot_class": "local_push"
+}

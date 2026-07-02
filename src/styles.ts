@@ -303,6 +303,27 @@ export const cardStyles = css`
     display: flex;
     flex-shrink: 0;
   }
+  /* The volume icon doubles as the mute toggle. */
+  .mute-btn {
+    background: none;
+    border: 0;
+    color: var(--wp-text);
+    cursor: pointer;
+    padding: 6px;
+    margin: -6px;
+    border-radius: 50%;
+    align-items: center;
+    justify-content: center;
+  }
+  /* Dim the whole volume row while muted so the state is readable at
+     a glance from across the room. */
+  .vol-row.muted .slider,
+  .vol-row.muted .vol-num {
+    opacity: 0.35;
+  }
+  .vol-row.muted .mute-btn {
+    color: var(--wp-accent);
+  }
   .vol-num {
     flex-shrink: 0;
     min-width: 28px;
@@ -589,6 +610,15 @@ export const cardStyles = css`
     background: var(--wp-accent-soft);
     color: var(--wp-bg);
   }
+  /* Optimistic state: tap registered, join/unjoin still in flight.
+     Gentle pulse tells the user the change is being applied. */
+  .grp-row.pending {
+    animation: grp-pending 1s ease-in-out infinite;
+  }
+  @keyframes grp-pending {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.6; }
+  }
   .grp-row.primary {
     background: var(--wp-accent);
     color: var(--wp-bg);
@@ -726,5 +756,16 @@ export const cardStyles = css`
      content remains reachable on a phone-sized viewport. */
   :host([narrow]) .pv-scroll {
     overflow-y: auto;
+  }
+
+  /* ACCESSIBILITY — keyboard focus. :focus-visible only fires for
+     keyboard/switch navigation, so touch and mouse users never see the
+     ring. Applies to every interactive surface including the custom
+     sliders (which are focusable via tabindex). */
+  button:focus-visible,
+  .slider:focus-visible,
+  .search-input:focus-visible {
+    outline: 2px solid var(--wp-accent);
+    outline-offset: 2px;
   }
 `;

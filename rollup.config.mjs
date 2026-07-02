@@ -5,18 +5,35 @@ import terser from "@rollup/plugin-terser";
 
 const dev = process.env.ROLLUP_WATCH;
 
-export default {
-  input: "src/wall-panel-sonos-card.ts",
-  output: {
-    file: "dist/wall-panel-sonos-card.js",
-    format: "es",
-    sourcemap: dev ? "inline" : false,
-    inlineDynamicImports: true,
+const plugins = () => [
+  resolve(),
+  commonjs(),
+  typescript({ tsconfig: "./tsconfig.json" }),
+  !dev && terser({ format: { comments: false } }),
+];
+
+export default [
+  // Lovelace bundle: main card + mini card, served by HACS.
+  {
+    input: "src/wall-panel-sonos-card.ts",
+    output: {
+      file: "dist/wall-panel-sonos-card.js",
+      format: "es",
+      sourcemap: dev ? "inline" : false,
+      inlineDynamicImports: true,
+    },
+    plugins: plugins(),
   },
-  plugins: [
-    resolve(),
-    commonjs(),
-    typescript({ tsconfig: "./tsconfig.json" }),
-    !dev && terser({ format: { comments: false } }),
-  ],
-};
+  // Sidebar panel: served by the wall_panel_sonos custom component
+  // (integration registers /wall_panel_sonos/panel.js as a static path).
+  {
+    input: "src/panel.ts",
+    output: {
+      file: "custom_components/wall_panel_sonos/panel.js",
+      format: "es",
+      sourcemap: dev ? "inline" : false,
+      inlineDynamicImports: true,
+    },
+    plugins: plugins(),
+  },
+];
