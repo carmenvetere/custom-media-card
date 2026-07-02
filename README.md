@@ -79,6 +79,35 @@ favorites:
     art: "linear-gradient(135deg, #00b3a4 0%, #f4d35e 100%)"
 ```
 
+## Shared store + sidebar panel (optional)
+
+By default each card instance keeps its own `favorites:` / `groups:` / `station_art:` in dashboard YAML. The bundled **`wall_panel_sonos` custom component** moves those lists into HA's `.storage` and adds a **"Sonos Card" sidebar panel** for editing them — every card with `use_shared_store: true` reads the same lists and updates live when you edit, across all dashboards.
+
+### Install the integration
+
+1. Copy `custom_components/wall_panel_sonos/` from this repo into `<config>/custom_components/` (HACS manages only the card; the integration is a manual copy).
+2. Add one line to `configuration.yaml`:
+   ```yaml
+   wall_panel_sonos:
+   ```
+3. Restart Home Assistant. A **Sonos Card** item appears in the sidebar.
+
+### Point cards at the store
+
+```yaml
+type: custom:wall-panel-sonos-card
+use_shared_store: true
+entities:
+  - media_player.living_room
+# favorites/groups/station_art may stay here as a fallback — they're
+# used until the store loads, or if the integration is removed.
+```
+
+Notes:
+- Edits in the panel require an **admin** user; wall tablets running restricted users can read but not write.
+- The store pushes updates over WebSocket — cards reflect panel edits immediately, no reload.
+- The mini card doesn't read the shared store yet (its `station_art` stays per-card config).
+
 ## Companion: Sonos Mini Card
 
 The bundle also registers `custom:wall-panel-sonos-mini-card` — a compact "Now Playing" tile sized for a home dashboard alongside weather / scene cards. Hides itself entirely when no configured entity is playing or paused. Tapping the art / text / room label fires a navigate action so a tap takes you to the full card.
@@ -111,6 +140,7 @@ The mini card uses the same metadata fallbacks as the full card: it borrows titl
 | `favorites` | array | no | — | Items shown in the Favorites view |
 | `default_view` | string | no | `player` | `player` / `favorites` / `search` / `grouping` |
 | `search_enabled` | boolean | no | `true` | Show the Search view in the header. Set `false` on wall-panel installs to avoid the on-screen keyboard prompt. Requires HA 2025.x for `media_player.search_media`. |
+| `use_shared_store` | boolean | no | `false` | Read favorites/groups/station_art from the `wall_panel_sonos` integration's shared store (see "Shared store + sidebar panel"). YAML lists become the fallback. |
 | `layout` | string | no | `wall` | `wall` (no search input) / `mobile` |
 | `track_scale` | number | no | `1.15` | Now-playing text scale (0.9–1.6) |
 | `vol_bar_scale` | number | no | `1.4` | Volume bar thickness (1.0–2.5) |

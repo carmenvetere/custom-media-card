@@ -28,6 +28,7 @@ import type {
   FavoriteConfig,
   StationArt,
   SearchMediaResult,
+  SharedStore,
 } from "./types";
 
 const fmt = (s: number) => {
@@ -71,6 +72,13 @@ export class WallPanelSonosCard extends LitElement implements LovelaceCard {
   // ~1-2s Sonos takes to re-form the group and push new group_members.
   @state() private _pendingGroup: Record<string, boolean> = {};
   private _pendingGroupTimers: Record<string, ReturnType<typeof setTimeout>> = {};
+  // Live copy of the wall_panel_sonos integration's shared store when
+  // use_shared_store is on. Null until the subscription delivers; YAML
+  // lists serve as the fallback until then (and if the integration is
+  // missing entirely).
+  @state() private _shared: SharedStore | null = null;
+  private _sharedUnsub?: () => void;
+  private _sharedAttempted = false;
   // When the user picks a favorite, show its name in the player view as
   // "Loading…" until hass reports a track change. Without this the
   // player view appears frozen on the previous track for a beat.
@@ -167,6 +175,30 @@ export class WallPanelSonosCard extends LitElement implements LovelaceCard {
     this._pendingGroupTimers = {};
     for (const t of Object.values(this._dragTimers)) clearTimeout(t);
     this._dragTimers = {};
+    this._sharedUnsub?.();
+    this._sharedUnsub = undefined;
+    this._sharedAttempted = false;
+  }
+
+  // Subscribe to the wall_panel_sonos shared store. One attempt per
+  // connect — if the integration isn't installed, we fall back to the
+  // YAML lists silently (a toast on every dashboard load would be
+  // obnoxious on installs that simply don't use the store).
+  private async _connectSharedStore() {
+    if (this._sharedAttempted || !this._config?.use_shared_store || !this.hass) return;
+    this._sharedAttempted = true;
+    try {
+      this._sharedUnsub = await this.hass.connection.subscribeMessage<SharedStore>(
+        data => { this._shared = data; },
+        { type: "wall_panel_sonos/subscribe" },
+      );
+    } catch {
+      // eslint-disable-next-line no-console
+      console.warn(
+        "[wall-panel-sonos-card] use_shared_store is on but the wall_panel_sonos "
+        + "integration didn't respond — using the card's YAML lists instead.",
+      );
+    }
   }
 
   // Run an action on pointerdown instead of waiting for the full
@@ -229,6 +261,7 @@ export class WallPanelSonosCard extends LitElement implements LovelaceCard {
 
   willUpdate(changed: PropertyValues) {
     if (!changed.has("hass") || !this._config) return;
+    this._connectSharedStore();
     // One-shot: when hass first arrives *and* something is actually
     // playing, switch the active room to that player. Only latch the
     // flag once we've truly picked — otherwise loading the dashboard
@@ -342,15 +375,30 @@ export class WallPanelSonosCard extends LitElement implements LovelaceCard {
     }
     return undefined;
   }
-  // Look up a user-configured station_art entry by substring match
-  // against media_content_id. Used to surface art/labels for streaming
+  // Curated lists. When use_shared_store is on and the store has
+  // loaded, the shared lists are authoritative (even when empty);
+  // the card's YAML lists are the fallback until then. `??` gives us
+  // exactly that: _shared is null until the subscription delivers.
+  private _favoritesList(): FavoriteConfig[] {
+    return (this._config.use_shared_store ? this._shared?.favorites : undefined)
+      ?? this._config.favorites ?? [];
+  }
+  private _groupsList(): { id: string; label: string; entities: string[] }[] {
+    return (this._config.use_shared_store ? this._shared?.groups : undefined)
+      ?? this._config.groups ?? [];
+  }
+  private _stationArtList(): StationArt[] {
+    return (this._config.use_shared_store ? this._shared?.station_art : undefined)
+      ?? this._config.station_art ?? [];
+  }
+  // Look up a station_art entry by substring match against
+  // media_content_id. Used to surface art/labels for streaming
   // sources HA doesn't populate metadata for (TuneIn, SiriusXM, etc.).
   private _stationArt(contentId: string | undefined): StationArt | undefined {
-    if (!contentId || !this._config?.station_art?.length) return undefined;
+    const entries = this._stationArtList();
+    if (!contentId || !entries.length) return undefined;
     const cid = contentId.toLowerCase();
-    return this._config.station_art.find(
-      e => e.match && cid.includes(e.match.toLowerCase()),
-    );
+    return entries.find(e => e.match && cid.includes(e.match.toLowerCase()));
   }
   // Sonos buries the streaming service in the media_content_id query
   // string when no `source` attribute is exposed (TuneIn radio, etc.).
@@ -809,7 +857,7 @@ export class WallPanelSonosCard extends LitElement implements LovelaceCard {
   }
 
   private _renderFavorites() {
-    const cfg = this._config.favorites ?? [];
+    const cfg = this._favoritesList();
     const tabs: Array<typeof this._favTab> = ["All", "Playlists", "Stations", "Albums"];
     const filtered = cfg.filter(f => {
       if (this._favTab === "Playlists" && f.type !== "playlist") return false;
@@ -1035,7 +1083,7 @@ export class WallPanelSonosCard extends LitElement implements LovelaceCard {
   }
 
   private _renderMenu(groupMembers: string[]) {
-    const savedGroups = this._config.groups ?? [];
+    const savedGroups = this._groupsList();
     const currentSig = [...groupMembers].sort().join(",");
     return html`
       <div class="menu-overlay" @click=${() => this._menuOpen = false}

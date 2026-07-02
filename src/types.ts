@@ -20,6 +20,11 @@ export interface WallPanelSonosCardConfig extends LovelaceCardConfig {
   // Defaults to true. Set false on wall-panel installs where an on-screen
   // keyboard prompt is undesirable.
   search_enabled?: boolean;
+  // Read favorites / groups / station_art from the wall_panel_sonos
+  // custom component's shared store (managed via the "Sonos Card"
+  // sidebar panel) instead of this card's YAML. The YAML lists remain
+  // the fallback until the store loads or if the integration is absent.
+  use_shared_store?: boolean;
   // Visual tweaks
   track_scale?: number; // 0.9 - 1.6
   vol_bar_scale?: number; // 1 - 2.5
@@ -61,6 +66,13 @@ export interface FavoriteConfig {
 }
 
 export type ViewName = "player" | "favorites" | "grouping" | "search";
+
+// Shape pushed by the wall_panel_sonos integration's subscribe command.
+export interface SharedStore {
+  favorites: FavoriteConfig[];
+  groups: { id: string; label: string; entities: string[] }[];
+  station_art: StationArt[];
+}
 
 // A single item returned by media_player/search_media. HA's shape is
 // permissive — some providers omit thumbnail, some omit content_type.
