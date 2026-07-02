@@ -159,6 +159,10 @@ export class WallPanelSonosMiniCard extends LitElement implements LovelaceCard {
       background: var(--wp-text);
       color: var(--wp-bg);
     }
+    button:focus-visible {
+      outline: 2px solid var(--primary-color, #8eb1bf);
+      outline-offset: 2px;
+    }
   `;
 
   @property({ attribute: false }) hass!: HomeAssistant;
@@ -263,12 +267,12 @@ export class WallPanelSonosMiniCard extends LitElement implements LovelaceCard {
             <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><path d="M9 18 V5 L20 3 V16 M9 18 A2.5 2.5 0 1 1 6.5 15.5 A2.5 2.5 0 0 1 9 18 M20 16 A2.5 2.5 0 1 1 17.5 13.5 A2.5 2.5 0 0 1 20 16"/></svg>
             <div class="hdr-title">Now Playing</div>
             <div class="hdr-rule"></div>
-            <button class="room" @click=${this._navigate}>
+            <button class="room" @click=${this._navigate} aria-label="Open full player for ${roomLabel}">
               ${roomLabel}${iconChev}
             </button>
           </div>
           <div class="body">
-            <button class="nav" @click=${this._navigate}>
+            <button class="nav" @click=${this._navigate} aria-label="Open full player">
               <div class="art" style=${styleMap({ background: cover })}></div>
               <div class="meta">
                 <div class="title">${title}</div>
@@ -276,12 +280,16 @@ export class WallPanelSonosMiniCard extends LitElement implements LovelaceCard {
               </div>
             </button>
             <div class="ctrls">
-              <button class="btn" @click=${() => Svc.setVolume(this.hass, id, Math.max(0, vol - step))}>${iconVolDown}</button>
-              <button class="btn primary" @click=${() => Svc.playPause(this.hass, id)}>
+              <button class="btn" aria-label="Volume down"
+                @click=${() => Svc.setVolume(this.hass, id, Math.max(0, vol - step))}>${iconVolDown}</button>
+              <button class="btn primary" aria-label=${playing ? "Pause" : "Play"}
+                @click=${() => Svc.playPause(this.hass, id)}>
                 ${playing ? iconPause : iconPlay}
               </button>
-              <button class="btn" @click=${() => Svc.setVolume(this.hass, id, Math.min(100, vol + step))}>${iconVolUp}</button>
-              <button class="btn" @click=${() => Svc.next(this.hass, id)}>${iconNext}</button>
+              <button class="btn" aria-label="Volume up"
+                @click=${() => Svc.setVolume(this.hass, id, Math.min(100, vol + step))}>${iconVolUp}</button>
+              <button class="btn" aria-label="Next track"
+                @click=${() => Svc.next(this.hass, id)}>${iconNext}</button>
             </div>
           </div>
         </div>

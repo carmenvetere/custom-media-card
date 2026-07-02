@@ -19,7 +19,7 @@ import {
   iconStar, iconSpeaker, iconChev, iconVol, iconVolUp, iconVolDown,
   iconPrev, iconNext, iconPlay, iconPause,
   iconStation, iconAlbum, iconPlaylist,
-  iconLink, iconCheck, iconEq, iconSearch, iconClose,
+  iconLink, iconCheck, iconEq, iconSearch, iconClose, iconVolMuted,
 } from "./icons";
 import type {
   WallPanelSonosCardConfig,
@@ -61,6 +61,16 @@ export class WallPanelSonosCard extends LitElement implements LovelaceCard {
   // button while the media_player.media_play_pause call is in flight.
   @state() private _optimisticPlaying: boolean | null = null;
   private _optimisticPlayingTimer?: ReturnType<typeof setTimeout>;
+  // Optimistic mute state for the active room — same pattern as
+  // _optimisticPlaying: flip on tap, clear when hass catches up or the
+  // safety timer fires. Reset on room switch since it's room-scoped.
+  @state() private _optimisticMuted: boolean | null = null;
+  private _optimisticMutedTimer?: ReturnType<typeof setTimeout>;
+  // Optimistic group membership (entity_id → desired grouped state).
+  // The Speakers view reflects a tap instantly instead of waiting the
+  // ~1-2s Sonos takes to re-form the group and push new group_members.
+  @state() private _pendingGroup: Record<string, boolean> = {};
+  private _pendingGroupTimers: Record<string, ReturnType<typeof setTimeout>> = {};
   // When the user picks a favorite, show its name in the player view as
   // "Loading…" until hass reports a track change. Without this the
   // player view appears frozen on the previous track for a beat.
@@ -152,8 +162,36 @@ export class WallPanelSonosCard extends LitElement implements LovelaceCard {
     if (this._optimisticPlayingTimer) clearTimeout(this._optimisticPlayingTimer);
     if (this._toastTimer) clearTimeout(this._toastTimer);
     if (this._searchDebounce) clearTimeout(this._searchDebounce);
+    if (this._optimisticMutedTimer) clearTimeout(this._optimisticMutedTimer);
+    for (const t of Object.values(this._pendingGroupTimers)) clearTimeout(t);
+    this._pendingGroupTimers = {};
     for (const t of Object.values(this._dragTimers)) clearTimeout(t);
     this._dragTimers = {};
+  }
+
+  // Run an action on pointerdown instead of waiting for the full
+  // press-release cycle — on a touch panel that's typically 80-150ms of
+  // perceived latency saved per tap. The subsequent synthetic click is
+  // suppressed via a short-lived flag on the element; keyboard
+  // activation (Enter/Space) produces a click with no preceding
+  // pointerdown, so it still works. Only use this for fixed controls —
+  // buttons inside scrollable lists must stay on click, otherwise
+  // starting a scroll would trigger them.
+  private _instant(fn: () => void) {
+    return (e: Event) => {
+      const el = e.currentTarget as HTMLElement & { _wpPressed?: boolean };
+      if (e.type === "pointerdown") {
+        const pe = e as PointerEvent;
+        if (pe.pointerType === "mouse" && pe.button !== 0) return;
+        el._wpPressed = true;
+        setTimeout(() => { el._wpPressed = false; }, 400);
+        fn();
+      } else if (el._wpPressed) {
+        el._wpPressed = false;
+      } else {
+        fn();
+      }
+    };
   }
 
   // Small wrapper around Svc.* promises so a failing service call
@@ -213,6 +251,33 @@ export class WallPanelSonosCard extends LitElement implements LovelaceCard {
           this._optimisticPlayingTimer = undefined;
         }
       }
+    }
+    // Same for optimistic mute.
+    if (this._optimisticMuted !== null) {
+      const real = !!this._state(this._activeRoom)?.attributes.is_volume_muted;
+      if (real === this._optimisticMuted) {
+        this._optimisticMuted = null;
+        if (this._optimisticMutedTimer) {
+          clearTimeout(this._optimisticMutedTimer);
+          this._optimisticMutedTimer = undefined;
+        }
+      }
+    }
+    // Clear pending group toggles that hass now reflects.
+    if (Object.keys(this._pendingGroup).length) {
+      const members = this._state(this._activeRoom)?.attributes.group_members ?? [this._activeRoom];
+      let nextPending: Record<string, boolean> | null = null;
+      for (const [id, desired] of Object.entries(this._pendingGroup)) {
+        if (members.includes(id) === desired) {
+          if (!nextPending) nextPending = { ...this._pendingGroup };
+          delete nextPending[id];
+          if (this._pendingGroupTimers[id]) {
+            clearTimeout(this._pendingGroupTimers[id]);
+            delete this._pendingGroupTimers[id];
+          }
+        }
+      }
+      if (nextPending) this._pendingGroup = nextPending;
     }
     // Clear the favorite "Loading…" overlay as soon as the track title
     // changes (Sonos has actually switched). Falls back to the 8s timer
@@ -328,6 +393,9 @@ export class WallPanelSonosCard extends LitElement implements LovelaceCard {
     this._activeRoom = id;
     this._userPickedRoom = true;
     this._menuOpen = false;
+    // Optimistic latches are scoped to the previously-active room.
+    this._optimisticMuted = null;
+    this._optimisticPlaying = null;
     // If the picked room is already grouped with the previously-active
     // room, just switch the view — don't tear the group apart. Otherwise
     // solo it (matches the dropdown's "pick a standalone room" intent).
@@ -339,6 +407,8 @@ export class WallPanelSonosCard extends LitElement implements LovelaceCard {
     this._activeRoom = primary;
     this._userPickedRoom = true;
     this._menuOpen = false;
+    this._optimisticMuted = null;
+    this._optimisticPlaying = null;
     this._svc(Svc.joinGroup(this.hass, primary, entities.slice(1)),
       `Couldn't create group "${this._label(primary)}"`);
   }
@@ -369,14 +439,39 @@ export class WallPanelSonosCard extends LitElement implements LovelaceCard {
   private _toggleInGroup(id: string) {
     if (id === this._activeRoom) return;
     const cur = this._groupMembers();
-    if (cur.includes(id)) {
-      this._svc(Svc.unjoin(this.hass, id), `Couldn't remove ${this._label(id)} from the group`);
-    } else {
+    const joining = !cur.includes(id);
+    // Reflect the tap instantly — Sonos takes ~1-2s to re-form the group
+    // and push new group_members. willUpdate clears the latch when hass
+    // catches up; the timer is the failure fallback.
+    this._pendingGroup = { ...this._pendingGroup, [id]: joining };
+    if (this._pendingGroupTimers[id]) clearTimeout(this._pendingGroupTimers[id]);
+    this._pendingGroupTimers[id] = setTimeout(() => {
+      delete this._pendingGroupTimers[id];
+      if (id in this._pendingGroup) {
+        const next = { ...this._pendingGroup };
+        delete next[id];
+        this._pendingGroup = next;
+      }
+    }, 6000);
+    if (joining) {
       this._svc(
         Svc.joinGroup(this.hass, this._activeRoom, [...cur.filter(x => x !== this._activeRoom), id]),
         `Couldn't add ${this._label(id)} to the group`,
       );
+    } else {
+      this._svc(Svc.unjoin(this.hass, id), `Couldn't remove ${this._label(id)} from the group`);
     }
+  }
+  private _onMuteToggle() {
+    const cur = this._optimisticMuted
+      ?? !!this._state(this._activeRoom)?.attributes.is_volume_muted;
+    this._optimisticMuted = !cur;
+    if (this._optimisticMutedTimer) clearTimeout(this._optimisticMutedTimer);
+    this._optimisticMutedTimer = setTimeout(() => { this._optimisticMuted = null; }, 5000);
+    this._svc(
+      Svc.muteToggle(this.hass, this._activeRoom, cur),
+      `Couldn't ${cur ? "unmute" : "mute"} ${this._label(this._activeRoom)}`,
+    );
   }
   private _slide(e: PointerEvent, max: number, onChange: (v: number) => void, key?: string) {
     const el = e.currentTarget as HTMLElement;
@@ -487,7 +582,8 @@ export class WallPanelSonosCard extends LitElement implements LovelaceCard {
       <div class="hdr">
         <div class="hdr-side left">
           <button class=${classMap({ "hdr-btn": true, active: this._view === "favorites" })}
-                  @click=${() => this._setView("favorites")} aria-label="Favorites">
+                  @click=${() => this._setView("favorites")}
+                  aria-label="Favorites" aria-pressed=${this._view === "favorites"}>
             ${iconStar}
           </button>
         </div>
@@ -502,12 +598,14 @@ export class WallPanelSonosCard extends LitElement implements LovelaceCard {
         <div class="hdr-side right">
           ${searchOn ? html`
             <button class=${classMap({ "hdr-btn": true, active: this._view === "search" })}
-                    @click=${() => this._setView("search")} aria-label="Search">
+                    @click=${() => this._setView("search")}
+                    aria-label="Search" aria-pressed=${this._view === "search"}>
               ${iconSearch}
             </button>
           ` : nothing}
           <button class=${classMap({ "hdr-btn": true, active: this._view === "grouping" })}
-                  @click=${() => this._setView("grouping")} aria-label="Speakers">
+                  @click=${() => this._setView("grouping")}
+                  aria-label="Speakers" aria-pressed=${this._view === "grouping"}>
             ${iconSpeaker}
           </button>
         </div>
@@ -526,6 +624,7 @@ export class WallPanelSonosCard extends LitElement implements LovelaceCard {
       : this._coordinatorMeta(a.group_members) ?? a;
     const dur = meta.media_duration ?? 0;
     const playing = this._optimisticPlaying ?? (s.state === "playing");
+    const muted = this._optimisticMuted ?? !!a.is_volume_muted;
     const realVol = Math.round((a.volume_level ?? 0) * 100);
     const room = this._activeRoom;
     const maxVol = this._maxVol();
@@ -584,17 +683,45 @@ export class WallPanelSonosCard extends LitElement implements LovelaceCard {
           <span>${fmt(dur)}</span>
         </div>
         <div class="transport">
-          <button class="t-btn" @click=${() => this._stepVol(-step, maxVol)}>${iconVolDown}</button>
-          <button class="t-btn" @click=${() => this._onSkip("prev")}>${iconPrev}</button>
-          <button class="play-btn" @click=${() => this._onPlayPause(playing)}>
-            ${playing ? iconPause : iconPlay}
-          </button>
-          <button class="t-btn" @click=${() => this._onSkip("next")}>${iconNext}</button>
-          <button class="t-btn" @click=${() => this._stepVol(step, maxVol)}>${iconVolUp}</button>
+          ${(() => {
+            // Fixed controls fire on pointerdown for instant response.
+            // Each handler is created once per render and shared between
+            // the pointerdown and click bindings — the double-fire guard
+            // lives on the element, so this is safe across re-renders.
+            const volDn = this._instant(() => this._stepVol(-step, maxVol));
+            const prev = this._instant(() => this._onSkip("prev"));
+            const play = this._instant(() => this._onPlayPause(playing));
+            const next = this._instant(() => this._onSkip("next"));
+            const volUp = this._instant(() => this._stepVol(step, maxVol));
+            return html`
+              <button class="t-btn" aria-label="Volume down"
+                @pointerdown=${volDn} @click=${volDn}>${iconVolDown}</button>
+              <button class="t-btn" aria-label="Previous track"
+                @pointerdown=${prev} @click=${prev}>${iconPrev}</button>
+              <button class="play-btn" aria-label=${playing ? "Pause" : "Play"}
+                @pointerdown=${play} @click=${play}>
+                ${playing ? iconPause : iconPlay}
+              </button>
+              <button class="t-btn" aria-label="Next track"
+                @pointerdown=${next} @click=${next}>${iconNext}</button>
+              <button class="t-btn" aria-label="Volume up"
+                @pointerdown=${volUp} @click=${volUp}>${iconVolUp}</button>
+            `;
+          })()}
         </div>
-        <div class="vol-row">
-          <span class="vol-icon">${iconVol}</span>
-          ${this._slider(vol, maxVol, v => Svc.setVolume(this.hass, this._activeRoom, v), this._activeRoom)}
+        <div class=${classMap({ "vol-row": true, muted })}>
+          ${(() => {
+            const mute = this._instant(() => this._onMuteToggle());
+            return html`
+              <button class="vol-icon mute-btn"
+                aria-label=${muted ? "Unmute" : "Mute"} aria-pressed=${muted}
+                @pointerdown=${mute} @click=${mute}>
+                ${muted ? iconVolMuted : iconVol}
+              </button>
+            `;
+          })()}
+          ${this._slider(vol, maxVol, v => Svc.setVolume(this.hass, this._activeRoom, v), this._activeRoom,
+            `Volume for ${this._label(this._activeRoom)}`)}
           <span class="vol-num">${vol}</span>
         </div>
       </div>
@@ -632,15 +759,53 @@ export class WallPanelSonosCard extends LitElement implements LovelaceCard {
     Svc.setVolume(this.hass, room, next);
   }
 
-  private _slider(value: number, max: number, onChange: (v: number) => void, key?: string) {
+  private _slider(value: number, max: number, onChange: (v: number) => void, key?: string, label = "Volume") {
     const display = key && key in this._dragVol ? this._dragVol[key] : value;
     const pct = max > 0 ? Math.max(0, Math.min(100, (display / max) * 100)) : 0;
     return html`
-      <div class="slider" @pointerdown=${(e: PointerEvent) => this._slide(e, max, onChange, key)}>
+      <div class="slider" role="slider" tabindex="0"
+        aria-label=${label}
+        aria-valuemin="0" aria-valuemax=${max} aria-valuenow=${display}
+        @pointerdown=${(e: PointerEvent) => this._slide(e, max, onChange, key)}
+        @keydown=${(e: KeyboardEvent) => this._sliderKeydown(e, display, max, onChange, key)}>
         <div class="fill" style=${styleMap({ width: `${pct}%` })}></div>
         <div class="knob" style=${styleMap({ left: `${pct}%` })}></div>
       </div>
     `;
+  }
+  private _sliderKeydown(
+    e: KeyboardEvent,
+    current: number,
+    max: number,
+    onChange: (v: number) => void,
+    key?: string,
+  ) {
+    const step = this._volStep(max);
+    let next: number | null = null;
+    switch (e.key) {
+      case "ArrowRight": case "ArrowUp": next = Math.min(max, current + step); break;
+      case "ArrowLeft": case "ArrowDown": next = Math.max(0, current - step); break;
+      case "Home": next = 0; break;
+      case "End": next = max; break;
+      default: return;
+    }
+    e.preventDefault();
+    if (next === current) return;
+    // Latch the optimistic value the same way pointer drags do, so the
+    // knob doesn't snap back while volume_set round-trips.
+    if (key) {
+      this._dragVol = { ...this._dragVol, [key]: next };
+      if (this._dragTimers[key]) clearTimeout(this._dragTimers[key]);
+      this._dragTimers[key] = setTimeout(() => {
+        delete this._dragTimers[key];
+        if (key in this._dragVol) {
+          const nextDrag = { ...this._dragVol };
+          delete nextDrag[key];
+          this._dragVol = nextDrag;
+        }
+      }, 2000);
+    }
+    onChange(next);
   }
 
   private _renderFavorites() {
@@ -660,9 +825,10 @@ export class WallPanelSonosCard extends LitElement implements LovelaceCard {
         <div class="fav-target">
           Play to <b>${this._label(this._activeRoom)}${groupSize > 1 ? ` +${groupSize - 1}` : ""}</b>
         </div>
-        <div class="tabs">
+        <div class="tabs" role="tablist" aria-label="Favorite categories">
           ${tabs.map(tb => html`
             <button class=${classMap({ tab: true, active: this._favTab === tb })}
+                    role="tab" aria-selected=${this._favTab === tb}
                     @click=${() => this._favTab = tb}>${tb}</button>
           `)}
         </div>
@@ -771,6 +937,7 @@ export class WallPanelSonosCard extends LitElement implements LovelaceCard {
           <span class="search-icon">${iconSearch}</span>
           <input class="search-input" type="search"
             .value=${live(this._searchQ)}
+            aria-label="Search media"
             placeholder="Search music, stations, podcasts…"
             @input=${(e: Event) => this._onSearchInput((e.target as HTMLInputElement).value)}
             @keydown=${(e: KeyboardEvent) => e.stopPropagation()}/>
@@ -814,13 +981,16 @@ export class WallPanelSonosCard extends LitElement implements LovelaceCard {
 
   private _renderGrouping(groupMembers: string[]) {
     const allEntities = this._config.entities;
-    const inGroup = (id: string) => groupMembers.includes(id);
+    // Overlay pending toggles on the hass-reported membership so a tap
+    // reflects instantly — Sonos takes ~1-2s to push new group_members.
+    const inGroup = (id: string) => this._pendingGroup[id] ?? groupMembers.includes(id);
+    const effectiveMembers = allEntities.filter(id => id === this._activeRoom || inGroup(id));
     return html`
       <div class="pv pv-scroll">
         <div class="grp-banner">
           <div style="min-width:0">
             <div class="lbl">Currently grouped</div>
-            <div class="rooms">${groupMembers.map(id => this._label(id)).join(" + ") || "—"}</div>
+            <div class="rooms">${effectiveMembers.map(id => this._label(id)).join(" + ") || "—"}</div>
           </div>
           <div class="hint">Tap to toggle</div>
         </div>
@@ -828,29 +998,32 @@ export class WallPanelSonosCard extends LitElement implements LovelaceCard {
           ${allEntities.map(id => {
             const active = id === this._activeRoom;
             const grouped = inGroup(id);
+            const pending = id in this._pendingGroup;
             return html`
-              <button class=${classMap({ "grp-row": true, primary: active, grouped: grouped && !active })}
+              <button class=${classMap({ "grp-row": true, primary: active, grouped: grouped && !active, pending })}
+                      aria-pressed=${grouped}
+                      aria-label="${this._label(id)}${active ? ", primary speaker" : grouped ? ", in group" : ", not in group"}"
                       @click=${() => this._toggleInGroup(id)}>
                 <span style="display:flex;align-items:center;gap:8px;flex:1;min-width:0">
                   ${active ? html`<span style="display:flex">${iconEq}</span>` : nothing}
                   <span style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${this._label(id)}</span>
                 </span>
                 ${active ? html`<span class="badge">PRIMARY</span>`
-                  : grouped ? html`<span style="width:20px;height:20px;border-radius:50%;background:rgba(255,255,255,0.6);display:flex;align-items:center;justify-content:center;color:var(--wp-bg)">${iconCheck}</span>`
+                  : grouped ? html`<span style="width:20px;height:20px;border-radius:50%;background:var(--wp-on-accent-soft);display:flex;align-items:center;justify-content:center;color:var(--wp-bg)">${iconCheck}</span>`
                   : nothing}
               </button>
             `;
           })}
         </div>
-        ${groupMembers.length > 1 ? html`
+        ${effectiveMembers.length > 1 ? html`
           <div class="grp-volumes">
             <div class="grp-volumes-title">Group Volumes</div>
-            ${groupMembers.map(id => {
+            ${effectiveMembers.map(id => {
               const v = Math.round((this._state(id)?.attributes.volume_level ?? 0) * 100);
               return html`
                 <div class="grp-vol-row">
                   <span class="name">${this._label(id)}${id === this._activeRoom ? html`<span style="color:var(--wp-accent)"> ·</span>` : nothing}</span>
-                  ${this._slider(v, 100, vv => Svc.setVolume(this.hass, id, vv), id)}
+                  ${this._slider(v, 100, vv => Svc.setVolume(this.hass, id, vv), id, `Volume for ${this._label(id)}`)}
                   <span class="val">${v}</span>
                 </div>
               `;
@@ -865,8 +1038,10 @@ export class WallPanelSonosCard extends LitElement implements LovelaceCard {
     const savedGroups = this._config.groups ?? [];
     const currentSig = [...groupMembers].sort().join(",");
     return html`
-      <div class="menu-overlay" @click=${() => this._menuOpen = false}>
-        <div class="menu-card" @click=${(e: Event) => e.stopPropagation()}>
+      <div class="menu-overlay" @click=${() => this._menuOpen = false}
+           @keydown=${(e: KeyboardEvent) => { if (e.key === "Escape") this._menuOpen = false; }}>
+        <div class="menu-card" role="dialog" aria-label="Rooms and groups"
+             @click=${(e: Event) => e.stopPropagation()}>
           ${groupMembers.length > 1 || savedGroups.length > 0 ? html`<div class="menu-section">Groups</div>` : nothing}
           ${groupMembers.length > 1 ? html`
             <button class="menu-item active">

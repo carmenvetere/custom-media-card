@@ -4,11 +4,13 @@ A Sonos multi-room control card for Home Assistant, designed for wall-mounted ta
 
 ## Features
 
-- **Player view** — cover, track meta, transport, volume slider sized for finger touch
+- **Player view** — cover, track meta, transport, volume slider sized for finger touch; tap the volume icon to mute/unmute
 - **Favorites view** — single-column list with category pills, curated via YAML or the visual editor
 - **Search view** — live query against `media_player.search_media` (HA 2025.x+); disable per-instance for wall panels where a keyboard prompt is unwelcome
-- **Speakers view** — tap to add/remove rooms from the current group, with per-room volume sliders for the group
+- **Speakers view** — tap to add/remove rooms from the current group, with per-room volume sliders for the group; taps reflect instantly while Sonos re-forms the group
 - **Header dropdown** — tap the room name to switch active speaker or jump to a saved group
+- **Instant touch response** — transport and mute fire on press (pointerdown), not release, and every state change renders optimistically before the Sonos round-trip completes
+- **Accessible** — full aria labeling, keyboard-operable sliders (arrow keys / Home / End), visible focus rings for keyboard navigation
 - **Tweakable** — track text size and volume bar thickness configurable per-instance
 - Dark theme by default, matching dusty-blue / sage accent palette
 
