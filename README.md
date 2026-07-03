@@ -92,6 +92,10 @@ By default each card instance keeps its own `favorites:` / `groups:` / `station_
    ```
 3. Restart Home Assistant. A **Sonos Card** item appears in the sidebar.
 
+### Migrate existing YAML lists
+
+The panel has an **⇪ Import from dashboards** button: it scans every dashboard for `wall-panel-sonos-card` instances and copies their `favorites` / `groups` / `station_art` into the store. Duplicates (matched by `id`, or `match` for station art) are skipped and existing store entries are never overwritten, so it's safe to run repeatedly. After importing, flip the cards to `use_shared_store: true` and delete the YAML lists at your leisure — they're harmless as a fallback.
+
 ### Point cards at the store
 
 ```yaml

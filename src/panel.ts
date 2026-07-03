@@ -157,6 +157,13 @@ export class WallPanelSonosPanel extends LitElement {
     }
     .banner.error { background: var(--error-color, #cf6679); color: #fff; }
     .banner.saving { background: var(--secondary-background-color); color: var(--secondary-text-color); }
+    .import-row {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      margin: 4px 0 16px;
+    }
+    .import-row .btn { flex-shrink: 0; }
   `;
 
   @property({ attribute: false }) hass!: HomeAssistant;
@@ -165,6 +172,7 @@ export class WallPanelSonosPanel extends LitElement {
   @state() private _data: SharedStore | null = null;
   @state() private _error: string | null = null;
   @state() private _saving = false;
+  @state() private _importResult: string | null = null;
   @state() private _open: SectionKey | null = "favorites";
   @state() private _openItem: Record<string, boolean> = {};
   private _unsub?: () => void;
@@ -209,6 +217,86 @@ export class WallPanelSonosPanel extends LitElement {
     }
   }
 
+  // ── Import from dashboards ────────────────────────────────────────
+  // Walk every Lovelace dashboard config, collect the lists from each
+  // wall-panel-sonos-card / mini-card instance, and merge anything new
+  // into the store. Existing store entries always win — import never
+  // overwrites, so it's safe to run repeatedly.
+  private async _importFromDashboards() {
+    this._saving = true;
+    this._error = null;
+    this._importResult = null;
+    try {
+      // null = the default dashboard; the list call returns the rest.
+      const paths: (string | null)[] = [null];
+      try {
+        const dashboards = await this.hass.callWS<{ url_path: string }[]>(
+          { type: "lovelace/dashboards/list" },
+        );
+        paths.push(...dashboards.map(d => d.url_path));
+      } catch { /* older HA without multi-dashboard — default only */ }
+
+      const cards: Record<string, unknown>[] = [];
+      const walk = (node: unknown) => {
+        if (Array.isArray(node)) { node.forEach(walk); return; }
+        if (node && typeof node === "object") {
+          const o = node as Record<string, unknown>;
+          if (o.type === "custom:wall-panel-sonos-card"
+            || o.type === "custom:wall-panel-sonos-mini-card") cards.push(o);
+          Object.values(o).forEach(walk);
+        }
+      };
+      for (const p of paths) {
+        try {
+          const cfg = await this.hass.callWS(
+            p === null
+              ? { type: "lovelace/config" }
+              : { type: "lovelace/config", url_path: p },
+          );
+          walk(cfg);
+        } catch { /* dashboard with no stored config (yaml default, etc.) */ }
+      }
+
+      if (!this._data) throw new Error("store not loaded yet");
+      const stats: string[] = [];
+      const merge = async <T>(
+        key: SectionKey,
+        existing: T[],
+        idOf: (item: T) => string | undefined,
+        collect: (card: Record<string, unknown>) => T[] | undefined,
+      ) => {
+        const seen = new Set(existing.map(idOf).filter(Boolean) as string[]);
+        const added: T[] = [];
+        let skipped = 0;
+        for (const card of cards) {
+          for (const item of collect(card) ?? []) {
+            const id = idOf(item);
+            if (!id || seen.has(id)) { skipped++; continue; }
+            seen.add(id);
+            added.push(item);
+          }
+        }
+        if (added.length) await this._save(key, [...existing, ...added]);
+        stats.push(`${added.length} ${key.replace("_", " ")}${skipped ? ` (${skipped} duplicates skipped)` : ""}`);
+      };
+
+      await merge<FavoriteConfig>("favorites", this._data.favorites,
+        f => f.id ?? f.name, c => c.favorites as FavoriteConfig[] | undefined);
+      await merge<GroupEntry>("groups", this._data.groups,
+        g => g.id ?? g.label, c => c.groups as GroupEntry[] | undefined);
+      await merge<StationArt>("station_art", this._data.station_art,
+        s => s.match, c => c.station_art as StationArt[] | undefined);
+
+      this._importResult = cards.length === 0
+        ? "No wall-panel-sonos-card instances found in any dashboard."
+        : `Scanned ${paths.length} dashboard${paths.length === 1 ? "" : "s"}, found ${cards.length} card${cards.length === 1 ? "" : "s"}. Imported ${stats.join(", ")}.`;
+    } catch (err) {
+      this._error = `Import failed: ${err instanceof Error ? err.message : err}`;
+    } finally {
+      this._saving = false;
+    }
+  }
+
   private _move<T>(list: T[], idx: number, dir: -1 | 1): T[] {
     const j = idx + dir;
     if (j < 0 || j >= list.length) return list;
@@ -241,8 +329,15 @@ export class WallPanelSonosPanel extends LitElement {
         </div>
         ${this._error ? html`<div class="banner error">${this._error}</div>` : nothing}
         ${this._saving ? html`<div class="banner saving">Saving…</div>` : nothing}
+        ${this._importResult ? html`<div class="banner saving">${this._importResult}</div>` : nothing}
         ${!this._data && !this._error ? html`<div class="banner saving">Loading…</div>` : nothing}
         ${this._data ? html`
+          <div class="import-row">
+            <button class="btn" ?disabled=${this._saving} @click=${() => this._importFromDashboards()}>
+              ⇪ Import from dashboards
+            </button>
+            <span class="help">Scans every dashboard for wall-panel-sonos-card instances and copies their YAML favorites, groups, and station art into the store. Never overwrites existing store entries — safe to run more than once.</span>
+          </div>
           ${this._section("favorites", "Favorites", `${this._data.favorites.length} items`, () => this._renderFavorites(this._data!))}
           ${this._section("groups", "Groups", `${this._data.groups.length} items`, () => this._renderGroups(this._data!))}
           ${this._section("station_art", "Station art", `${this._data.station_art.length} mappings`, () => this._renderStationArt(this._data!))}
