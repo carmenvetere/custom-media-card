@@ -2,7 +2,7 @@
 // Every interactive surface in the card calls one of these.
 
 import type { HomeAssistant } from "custom-card-helpers";
-import type { SearchMediaResult } from "./types";
+import type { BrowseMediaNode, SearchMediaResult } from "./types";
 
 export const playPause = (hass: HomeAssistant, entity_id: string) =>
   hass.callService("media_player", "media_play_pause", { entity_id });
@@ -144,4 +144,71 @@ const extractSearchResult = (
   const perEntity = arrayAt(r[entity_id]);
   if (perEntity) return perEntity;
   return [];
+};
+
+// Browse a media_player's media tree over the WebSocket API. Used to
+// enumerate the Music Assistant library (playlists / radio / albums)
+// for the Favorites view's music_assistant source.
+export const browseMedia = (
+  hass: HomeAssistant,
+  entity_id: string,
+  media_content_id?: string,
+  media_content_type?: string,
+): Promise<BrowseMediaNode> =>
+  hass.callWS({
+    type: "media_player/browse_media",
+    entity_id,
+    ...(media_content_id ? { media_content_id } : {}),
+    ...(media_content_type ? { media_content_type } : {}),
+  });
+
+// Fallback search path for Music Assistant installs whose player
+// entities don't implement media_player.search_media yet: the
+// music_assistant.search action searches all configured providers.
+// It needs the MA config entry id, which we look up by domain.
+export const maSearch = async (
+  hass: HomeAssistant,
+  search_query: string,
+  limit = 8,
+): Promise<SearchMediaResult[]> => {
+  const entries = await hass.callWS<{ entry_id: string; domain: string }[]>({
+    type: "config_entries/get",
+    domain: "music_assistant",
+  });
+  const entry = entries?.[0];
+  if (!entry) throw new Error("Music Assistant integration not found");
+  const raw = await hass.callWS<Record<string, unknown>>({
+    type: "call_service",
+    domain: "music_assistant",
+    service: "search",
+    service_data: {
+      config_entry_id: entry.entry_id,
+      name: search_query,
+      limit,
+    },
+    return_response: true,
+  });
+  const resp = ((raw as { response?: unknown })?.response ?? raw) as Record<string, unknown>;
+  // Response groups items by category; each item carries uri /
+  // media_type / name / image. Category list is defensive — MA has
+  // grown podcasts/audiobooks over time.
+  const out: SearchMediaResult[] = [];
+  const CATEGORIES = ["tracks", "artists", "albums", "playlists", "radio", "podcasts", "audiobooks"];
+  for (const cat of CATEGORIES) {
+    const items = resp?.[cat];
+    if (!Array.isArray(items)) continue;
+    for (const item of items as Record<string, unknown>[]) {
+      const uri = item.uri ?? item.media_content_id;
+      const name = item.name ?? item.title;
+      if (typeof uri !== "string" || typeof name !== "string") continue;
+      out.push({
+        title: name,
+        media_content_id: uri,
+        media_content_type: (item.media_type as string | undefined) ?? "music",
+        media_class: cat.replace(/s$/, ""),
+        thumbnail: (item.image as string | undefined) ?? undefined,
+      });
+    }
+  }
+  return out;
 };

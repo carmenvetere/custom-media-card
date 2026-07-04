@@ -25,6 +25,17 @@ export interface WallPanelSonosCardConfig extends LovelaceCardConfig {
   // sidebar panel) instead of this card's YAML. The YAML lists remain
   // the fallback until the store loads or if the integration is absent.
   use_shared_store?: boolean;
+  // Map each native Sonos entity to its Music Assistant twin
+  // (media_player.living_room -> media_player.living_room_2 etc.).
+  // When set, Search runs against the MA entity (cross-provider
+  // results instead of the Sonos local-library-only search) and MA
+  // items play through it — audio still comes out of the same speaker.
+  ma_entities?: Record<string, string>;
+  // Where the Favorites view gets its list. "config" (default) uses
+  // the YAML / shared-store lists; "music_assistant" live-browses the
+  // MA library (playlists / radio / albums), so favoriting in MA's own
+  // UI is all the curation needed.
+  favorites_source?: "config" | "music_assistant";
   // Visual tweaks
   track_scale?: number; // 0.9 - 1.6
   vol_bar_scale?: number; // 1 - 2.5
@@ -66,6 +77,28 @@ export interface FavoriteConfig {
 }
 
 export type ViewName = "player" | "favorites" | "grouping" | "search";
+
+// A node returned by the media_player/browse_media WebSocket command.
+export interface BrowseMediaNode {
+  title: string;
+  media_class?: string;
+  media_content_id?: string;
+  media_content_type?: string;
+  can_play?: boolean;
+  can_expand?: boolean;
+  thumbnail?: string;
+  children?: BrowseMediaNode[];
+}
+
+// A Music Assistant library item shown in the Favorites view, tagged
+// with which section it came from so the tab pills can filter it.
+export interface MaFavorite {
+  title: string;
+  media_content_id: string;
+  media_content_type?: string;
+  thumbnail?: string;
+  category: "playlist" | "station" | "album";
+}
 
 // Shape pushed by the wall_panel_sonos integration's subscribe command.
 export interface SharedStore {

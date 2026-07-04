@@ -29,6 +29,7 @@ import type {
   StationArt,
   SearchMediaResult,
   SharedStore,
+  MaFavorite,
 } from "./types";
 
 const fmt = (s: number) => {
@@ -79,6 +80,14 @@ export class WallPanelSonosCard extends LitElement implements LovelaceCard {
   @state() private _shared: SharedStore | null = null;
   private _sharedUnsub?: () => void;
   private _sharedAttempted = false;
+  // Music Assistant library snapshot for favorites_source:
+  // music_assistant. Refetched when the favorites view is opened after
+  // the cache has gone stale.
+  @state() private _maFavs: MaFavorite[] | null = null;
+  @state() private _maFavsLoading = false;
+  @state() private _maFavsError: string | null = null;
+  private _maFavsFetchedAt = 0;
+  private static readonly MA_FAVS_TTL_MS = 5 * 60 * 1000;
   // When the user picks a favorite, show its name in the player view as
   // "Loading…" until hass reports a track change. Without this the
   // player view appears frozen on the previous track for a beat.
@@ -262,6 +271,12 @@ export class WallPanelSonosCard extends LitElement implements LovelaceCard {
   willUpdate(changed: PropertyValues) {
     if (!changed.has("hass") || !this._config) return;
     this._connectSharedStore();
+    // Lazy-load the MA library when the favorites view needs it. The
+    // guards make this a no-op on every update while fresh/loading.
+    if (this._view === "favorites"
+      && this._config.favorites_source === "music_assistant") {
+      this._fetchMaFavorites();
+    }
     // One-shot: when hass first arrives *and* something is actually
     // playing, switch the active room to that player. Only latch the
     // flag once we've truly picked — otherwise loading the dashboard
@@ -391,6 +406,86 @@ export class WallPanelSonosCard extends LitElement implements LovelaceCard {
     return (this._config.use_shared_store ? this._shared?.station_art : undefined)
       ?? this._config.station_art ?? [];
   }
+  // The Music Assistant twin of a native Sonos entity, when mapped.
+  // MA plays through the same physical speaker, so targeting the MA
+  // entity for search/catalog playback keeps the audio in the room the
+  // user picked while the native entity keeps showing TV/line-in state.
+  private _maEntity(roomId: string): string | undefined {
+    return this._config.ma_entities?.[roomId];
+  }
+  private _anyMaEntity(): string | undefined {
+    const map = this._config.ma_entities ?? {};
+    return map[this._activeRoom] ?? Object.values(map)[0];
+  }
+  // Enumerate the MA library for the Favorites view: browse the MA
+  // entity's root, then the playlists / radio / albums sections. In
+  // MA, "add to library" IS favoriting — so these lists are exactly
+  // what the user curates in MA's own UI.
+  private async _fetchMaFavorites(force = false) {
+    if (this._maFavsLoading) return;
+    const fresh = Date.now() - this._maFavsFetchedAt < WallPanelSonosCard.MA_FAVS_TTL_MS;
+    if (!force && this._maFavs && fresh) return;
+    if (!force && this._maFavsError && fresh) return; // don't hammer a failing backend
+    const ma = this._anyMaEntity();
+    if (!ma) {
+      this._maFavsError = "favorites_source is music_assistant but no ma_entities are mapped.";
+      this._maFavsFetchedAt = Date.now();
+      return;
+    }
+    this._maFavsLoading = true;
+    this._maFavsError = null;
+    try {
+      const root = await Svc.browseMedia(this.hass, ma);
+      const sections: [RegExp, MaFavorite["category"]][] = [
+        [/playlist/i, "playlist"],
+        [/radio|station/i, "station"],
+        [/album/i, "album"],
+      ];
+      const items: MaFavorite[] = [];
+      for (const child of root.children ?? []) {
+        const section = sections.find(([re]) =>
+          re.test(child.title) || re.test(child.media_content_id ?? ""));
+        if (!section || !child.can_expand) continue;
+        const node = await Svc.browseMedia(
+          this.hass, ma, child.media_content_id, child.media_content_type);
+        for (const it of node.children ?? []) {
+          if (!it.can_play || !it.media_content_id) continue;
+          items.push({
+            title: it.title,
+            media_content_id: it.media_content_id,
+            media_content_type: it.media_content_type,
+            thumbnail: it.thumbnail,
+            category: section[1],
+          });
+        }
+      }
+      this._maFavs = items;
+      this._maFavsFetchedAt = Date.now();
+    } catch (err) {
+      this._maFavsError = `Couldn't browse Music Assistant: ${err instanceof Error ? err.message : err}`;
+      this._maFavsFetchedAt = Date.now();
+    } finally {
+      this._maFavsLoading = false;
+    }
+  }
+  private _playMaFavorite(f: MaFavorite) {
+    // Never fall back to another room's MA entity here — that would
+    // start audio in the wrong room. Explain instead.
+    const target = this._maEntity(this._activeRoom);
+    if (!target) {
+      this._showToast(`${this._label(this._activeRoom)} has no ma_entities mapping — add one to play Music Assistant favorites there.`);
+      return;
+    }
+    this._svc(
+      Svc.playMedia(this.hass, target, f.media_content_id, f.media_content_type ?? "music"),
+      `Couldn't play "${f.title}"`,
+    );
+    this._prevTitle = this._state(this._activeRoom)?.attributes.media_title;
+    this._loadingName = f.title;
+    if (this._loadingTimer) clearTimeout(this._loadingTimer);
+    this._loadingTimer = setTimeout(() => { this._loadingName = null; }, 8000);
+    this._view = "player";
+  }
   // Look up a station_art entry by substring match against
   // media_content_id. Used to surface art/labels for streaming
   // sources HA doesn't populate metadata for (TuneIn, SiriusXM, etc.).
@@ -431,6 +526,10 @@ export class WallPanelSonosCard extends LitElement implements LovelaceCard {
   private _setView(v: ViewName) {
     this._view = (this._view === v && v !== "player") ? "player" : v;
     this._menuOpen = false;
+    if (this._view === "favorites"
+      && this._config?.favorites_source === "music_assistant") {
+      this._fetchMaFavorites();
+    }
   }
   private _onTitleClick() {
     if (this._view !== "player") this._view = "player";
@@ -857,21 +956,22 @@ export class WallPanelSonosCard extends LitElement implements LovelaceCard {
   }
 
   private _renderFavorites() {
-    const cfg = this._favoritesList();
+    const maSource = this._config.favorites_source === "music_assistant";
     const tabs: Array<typeof this._favTab> = ["All", "Playlists", "Stations", "Albums"];
-    const filtered = cfg.filter(f => {
-      if (this._favTab === "Playlists" && f.type !== "playlist") return false;
-      if (this._favTab === "Stations" && f.type !== "station") return false;
-      if (this._favTab === "Albums" && f.type !== "album") return false;
-      if (this._favQ && !f.name.toLowerCase().includes(this._favQ.toLowerCase())) return false;
-      return true;
-    });
     const groupSize = this._groupMembers().length;
+    const tabType = this._favTab === "Playlists" ? "playlist"
+      : this._favTab === "Stations" ? "station"
+      : this._favTab === "Albums" ? "album"
+      : null;
 
     return html`
       <div class="pv pv-scroll">
         <div class="fav-target">
           Play to <b>${this._label(this._activeRoom)}${groupSize > 1 ? ` +${groupSize - 1}` : ""}</b>
+          ${maSource ? html`
+            <button class="fav-refresh" aria-label="Refresh from Music Assistant"
+              @click=${() => this._fetchMaFavorites(true)}>↻</button>
+          ` : nothing}
         </div>
         <div class="tabs" role="tablist" aria-label="Favorite categories">
           ${tabs.map(tb => html`
@@ -881,19 +981,53 @@ export class WallPanelSonosCard extends LitElement implements LovelaceCard {
           `)}
         </div>
         <div class="fav-list">
-          ${filtered.length === 0
-            ? html`<div style="text-align:center;color:var(--wp-text-dim);padding:40px;font-size:15px">No favorites configured</div>`
-            : filtered.map(f => html`
-              <button class="fav-item" @click=${() => this._playFavorite(f)}>
-                <span class="fav-art" style=${styleMap({ background: f.art ?? "linear-gradient(135deg,#4a5d72,#2a3540)" })}>
-                  ${f.type === "station" ? iconStation : f.type === "album" ? iconAlbum : iconPlaylist}
-                </span>
-                <span class="fav-label">${f.name}</span>
-              </button>
-            `)}
+          ${maSource ? this._renderMaFavList(tabType) : this._renderConfigFavList(tabType)}
         </div>
       </div>
     `;
+  }
+  private _renderConfigFavList(tabType: string | null) {
+    const filtered = this._favoritesList().filter(f => {
+      if (tabType && f.type !== tabType) return false;
+      if (this._favQ && !f.name.toLowerCase().includes(this._favQ.toLowerCase())) return false;
+      return true;
+    });
+    if (filtered.length === 0)
+      return html`<div class="fav-empty">No favorites configured</div>`;
+    return filtered.map(f => html`
+      <button class="fav-item" @click=${() => this._playFavorite(f)}>
+        <span class="fav-art" style=${styleMap({ background: f.art ?? "linear-gradient(135deg,#4a5d72,#2a3540)" })}>
+          ${f.type === "station" ? iconStation : f.type === "album" ? iconAlbum : iconPlaylist}
+        </span>
+        <span class="fav-label">${f.name}</span>
+      </button>
+    `);
+  }
+  private _renderMaFavList(tabType: string | null) {
+    if (this._maFavsError)
+      return html`<div class="fav-empty error">${this._maFavsError}</div>`;
+    if (!this._maFavs)
+      return html`<div class="fav-empty">Loading Music Assistant library…</div>`;
+    const filtered = this._maFavs.filter(f => {
+      if (tabType && f.category !== tabType) return false;
+      if (this._favQ && !f.title.toLowerCase().includes(this._favQ.toLowerCase())) return false;
+      return true;
+    });
+    if (filtered.length === 0)
+      return html`<div class="fav-empty">Nothing in the Music Assistant library${tabType ? ` under ${this._favTab}` : ""}. Favorite items in MA's UI and they appear here.</div>`;
+    return filtered.map(f => html`
+      <button class="fav-item" @click=${() => this._playMaFavorite(f)}>
+        <span class="fav-art" style=${styleMap({ background: f.thumbnail
+          ? cssUrl(f.thumbnail)
+          : "linear-gradient(135deg,#4a5d72,#2a3540)" })}>
+          ${f.thumbnail ? nothing
+            : f.category === "station" ? iconStation
+            : f.category === "album" ? iconAlbum
+            : iconPlaylist}
+        </span>
+        <span class="fav-label">${f.title}</span>
+      </button>
+    `);
   }
 
   private _playFavorite(f: FavoriteConfig) {
@@ -941,13 +1075,35 @@ export class WallPanelSonosCard extends LitElement implements LovelaceCard {
     const gen = ++this._searchGen;
     this._searchLoading = true;
     this._searchError = null;
+    // Prefer the Music Assistant twin — the native Sonos search_media
+    // only searches a local music library, while MA searches every
+    // configured provider (Spotify, TuneIn, podcasts, …).
+    const target = this._maEntity(this._activeRoom) ?? this._activeRoom;
+    const maAvailable = !!this._anyMaEntity();
     try {
-      const results = await Svc.searchMedia(this.hass, this._activeRoom, q);
+      let results = await Svc.searchMedia(this.hass, target, q);
+      // Some MA versions don't implement media_player.search_media —
+      // and the native Sonos one comes back empty without a local
+      // library. Either way, when MA is mapped, its search action is
+      // the better second try.
+      if (!results.length && maAvailable) {
+        results = await Svc.maSearch(this.hass, q);
+      }
       // Ignore late responses that no longer match the current query.
       if (gen !== this._searchGen) return;
       this._searchResults = results.slice(0, 60);
     } catch (err) {
       if (gen !== this._searchGen) return;
+      // The service path failed outright — if MA is mapped, still try
+      // its search action before surfacing an error.
+      if (maAvailable) {
+        try {
+          const results = await Svc.maSearch(this.hass, q);
+          if (gen !== this._searchGen) return;
+          this._searchResults = results.slice(0, 60);
+          return;
+        } catch { /* fall through to the original error */ }
+      }
       const msg = err instanceof Error ? err.message : String(err);
       // The most common failure is search_media not being registered —
       // older HA, or an integration that hasn't implemented it. Give a
@@ -963,8 +1119,11 @@ export class WallPanelSonosCard extends LitElement implements LovelaceCard {
   private _playSearchResult(r: SearchMediaResult) {
     if (!r.media_content_id) return;
     const type = r.media_content_type ?? r.media_class ?? "music";
+    // MA URIs (library://…, spotify://…) must play through the MA
+    // entity; it outputs to the same speaker as the native one.
+    const target = this._maEntity(this._activeRoom) ?? this._activeRoom;
     this._svc(
-      Svc.playMedia(this.hass, this._activeRoom, r.media_content_id, type),
+      Svc.playMedia(this.hass, target, r.media_content_id, type),
       `Couldn't play "${r.title}"`,
     );
     this._prevTitle = this._state(this._activeRoom)?.attributes.media_title;
