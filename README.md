@@ -4,10 +4,9 @@ A Sonos multi-room control card for Home Assistant, designed for wall-mounted ta
 
 ## Features
 
-- **Player view** — cover, track meta, transport, volume slider sized for finger touch; tap the volume icon to mute/unmute
+- **Player view** — cover, track meta, transport, volume slider sized for finger touch; tap the volume icon to mute/unmute. When the room is grouped, the volume slider controls the whole group: it shows the members' average and moves everyone by the same amount, preserving per-room offsets
 - **Favorites view** — single-column list with category pills, curated via YAML or the visual editor
-- **Search view** — live query against `media_player.search_media` (HA 2025.x+); disable per-instance for wall panels where a keyboard prompt is unwelcome
-- **Speakers view** — tap to add/remove rooms from the current group, with per-room volume sliders for the group; taps reflect instantly while Sonos re-forms the group
+- **Speakers view** — saved groups as one-tap pills, plus tap to add/remove rooms from the current group, with per-room volume sliders; taps reflect instantly while Sonos re-forms the group
 - **Header dropdown** — tap the room name to switch active speaker or jump to a saved group
 - **Instant touch response** — transport and mute fire on press (pointerdown), not release, and every state change renders optimistically before the Sonos round-trip completes
 - **Accessible** — full aria labeling, keyboard-operable sliders (arrow keys / Home / End), visible focus rings for keyboard navigation
@@ -79,61 +78,6 @@ favorites:
     art: "linear-gradient(135deg, #00b3a4 0%, #f4d35e 100%)"
 ```
 
-## Music Assistant integration (recommended)
-
-The native Sonos `media_player.search_media` only searches a local music library — it does **not** search streaming services. [Music Assistant](https://music-assistant.io/) does, and it also has a first-class favorites UI. When MA is installed (each Sonos room gets an MA twin entity), map them in the card:
-
-```yaml
-type: custom:wall-panel-sonos-card
-entities:                      # native Sonos entities — keep TV/line-in status
-  - media_player.living_room
-  - media_player.kitchen
-ma_entities:                   # native → Music Assistant twin
-  media_player.living_room: media_player.living_room_2
-  media_player.kitchen: media_player.kitchen_2
-favorites_source: music_assistant   # optional — see below
-```
-
-What this enables:
-
-- **Search across all MA providers** (Spotify, TuneIn, podcasts, local files, …). The Search view targets the MA twin of the active room; if the entity doesn't support `search_media`, the card automatically falls back to the `music_assistant.search` action. Results play through MA to the same speaker.
-- **`favorites_source: music_assistant`** — the Favorites view live-browses the MA library (playlists → Playlists tab, radio → Stations, albums → Albums) instead of a hand-curated list. In MA, "add to library" *is* favoriting, so curating happens in MA's search/browse UI and the card follows along (5-minute cache; ↻ button to refresh). Rooms without an `ma_entities` mapping get an explanatory message instead of playing audio in the wrong room.
-
-The native entities stay in `entities:`, so TV/line-in status, grouping, and volume all keep working exactly as before.
-
-## Shared store + sidebar panel (optional)
-
-By default each card instance keeps its own `favorites:` / `groups:` / `station_art:` in dashboard YAML. The bundled **`wall_panel_sonos` custom component** moves those lists into HA's `.storage` and adds a **"Sonos Card" sidebar panel** for editing them — every card with `use_shared_store: true` reads the same lists and updates live when you edit, across all dashboards.
-
-### Install the integration
-
-1. Copy `custom_components/wall_panel_sonos/` from this repo into `<config>/custom_components/` (HACS manages only the card; the integration is a manual copy).
-2. Add one line to `configuration.yaml`:
-   ```yaml
-   wall_panel_sonos:
-   ```
-3. Restart Home Assistant. A **Sonos Card** item appears in the sidebar.
-
-### Migrate existing YAML lists
-
-The panel has an **⇪ Import from dashboards** button: it scans every dashboard for `wall-panel-sonos-card` instances and copies their `favorites` / `groups` / `station_art` into the store. Duplicates (matched by `id`, or `match` for station art) are skipped and existing store entries are never overwritten, so it's safe to run repeatedly. After importing, flip the cards to `use_shared_store: true` and delete the YAML lists at your leisure — they're harmless as a fallback.
-
-### Point cards at the store
-
-```yaml
-type: custom:wall-panel-sonos-card
-use_shared_store: true
-entities:
-  - media_player.living_room
-# favorites/groups/station_art may stay here as a fallback — they're
-# used until the store loads, or if the integration is removed.
-```
-
-Notes:
-- Edits in the panel require an **admin** user; wall tablets running restricted users can read but not write.
-- The store pushes updates over WebSocket — cards reflect panel edits immediately, no reload.
-- The mini card doesn't read the shared store yet (its `station_art` stays per-card config).
-
 ## Companion: Sonos Mini Card
 
 The bundle also registers `custom:wall-panel-sonos-mini-card` — a compact "Now Playing" tile sized for a home dashboard alongside weather / scene cards. Hides itself entirely when no configured entity is playing or paused. Tapping the art / text / room label fires a navigate action so a tap takes you to the full card.
@@ -162,13 +106,9 @@ The mini card uses the same metadata fallbacks as the full card: it borrows titl
 |---|---|---|---|---|
 | `entities` | string[] | yes | — | Sonos `media_player.*` entity IDs |
 | `names` | object | no | — | Map of `entity_id → friendly label` override |
-| `groups` | array | no | — | Saved groups shown in the room dropdown |
+| `groups` | array | no | — | Saved groups, shown in the room dropdown and as one-tap pills in the Speakers view |
 | `favorites` | array | no | — | Items shown in the Favorites view |
-| `default_view` | string | no | `player` | `player` / `favorites` / `search` / `grouping` |
-| `search_enabled` | boolean | no | `true` | Show the Search view in the header. Set `false` on wall-panel installs to avoid the on-screen keyboard prompt. Requires HA 2025.x for `media_player.search_media`. |
-| `use_shared_store` | boolean | no | `false` | Read favorites/groups/station_art from the `wall_panel_sonos` integration's shared store (see "Shared store + sidebar panel"). YAML lists become the fallback. |
-| `ma_entities` | object | no | — | Map of native Sonos entity → Music Assistant twin. Enables cross-provider Search and MA playback (see "Music Assistant integration"). |
-| `favorites_source` | string | no | `config` | `config` (YAML / shared store) or `music_assistant` (live-browse the MA library). |
+| `default_view` | string | no | `player` | `player` / `favorites` / `grouping` |
 | `layout` | string | no | `wall` | `wall` (no search input) / `mobile` |
 | `track_scale` | number | no | `1.15` | Now-playing text scale (0.9–1.6) |
 | `vol_bar_scale` | number | no | `1.4` | Volume bar thickness (1.0–2.5) |
