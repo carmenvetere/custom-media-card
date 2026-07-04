@@ -364,7 +364,32 @@ export const cardStyles = css`
     font-size: 14px;
     color: var(--wp-text-dim);
     padding: 2px 4px 10px;
+    display: flex;
+    align-items: center;
+    gap: 6px;
   }
+  .fav-target b { white-space: nowrap; }
+  .fav-refresh {
+    margin-left: auto;
+    background: var(--wp-overlay-soft);
+    border: 0;
+    color: var(--wp-text);
+    width: 30px;
+    height: 30px;
+    border-radius: 50%;
+    cursor: pointer;
+    font-size: 15px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+  .fav-empty {
+    text-align: center;
+    color: var(--wp-text-dim);
+    padding: 40px 20px;
+    font-size: 15px;
+  }
+  .fav-empty.error { color: var(--error-color, #cf6679); }
   .fav-target b {
     color: var(--wp-accent);
     font-weight: 600;
