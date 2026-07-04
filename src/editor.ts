@@ -271,21 +271,6 @@ export class WallPanelSonosCardEditor
                   this._emit({ ...this._config, names: Object.keys(nextNames).length ? nextNames : undefined });
                 }}/>
             </div>
-            <div class="row">
-              <label>Music Assistant entity (optional)</label>
-              <select @change=${(e: Event) => {
-                  const v = (e.target as HTMLSelectElement).value;
-                  const nextMa = { ...(this._config.ma_entities ?? {}) };
-                  if (v) nextMa[id] = v; else delete nextMa[id];
-                  this._emit({ ...this._config, ma_entities: Object.keys(nextMa).length ? nextMa : undefined });
-                }}>
-                <option value="">— none —</option>
-                ${this._entityOptions().filter(e => e !== id).map(e => html`
-                  <option value=${e} ?selected=${this._config.ma_entities?.[id] === e}>${e}</option>
-                `)}
-              </select>
-              <div class="help">The MA twin of this speaker. Enables cross-provider Search and the <code>music_assistant</code> favorites source for this room.</div>
-            </div>
           </div>
         </div>
       `)}
@@ -308,7 +293,7 @@ export class WallPanelSonosCardEditor
     <div class="row">
       <label>Default view</label>
       <select @change=${(e: Event) => this._val("default_view", (e.target as HTMLSelectElement).value as any)}>
-        ${["player","favorites","search","grouping"].map(v => html`
+        ${["player","favorites","grouping"].map(v => html`
           <option value=${v} ?selected=${this._config.default_view === v}>${v}</option>
         `)}
       </select>
@@ -319,32 +304,6 @@ export class WallPanelSonosCardEditor
         <option value="wall" ?selected=${(this._config.layout ?? "wall") === "wall"}>wall</option>
         <option value="mobile" ?selected=${this._config.layout === "mobile"}>mobile</option>
       </select>
-    </div>
-    <div class="row-inline">
-      <label style="flex:1">
-        <input type="checkbox"
-          ?checked=${this._config.search_enabled !== false}
-          @change=${(e: Event) => this._val("search_enabled", (e.target as HTMLInputElement).checked)}/>
-        Show Search view
-      </label>
-      <div class="help" style="flex:2">Uses <code>media_player.search_media</code> (HA 2025.x+). Disable if this card lives on a wall panel where you don't want a keyboard prompt.</div>
-    </div>
-    <div class="row-inline">
-      <label style="flex:1">
-        <input type="checkbox"
-          ?checked=${this._config.use_shared_store === true}
-          @change=${(e: Event) => this._val("use_shared_store", (e.target as HTMLInputElement).checked)}/>
-        Use shared store
-      </label>
-      <div class="help" style="flex:2">Read favorites, groups, and station art from the <code>wall_panel_sonos</code> integration (managed via the "Sonos Card" sidebar panel) instead of this card's own lists. The sections below become the fallback when the integration is unavailable.</div>
-    </div>
-    <div class="row">
-      <label>Favorites source</label>
-      <select @change=${(e: Event) => this._val("favorites_source", (e.target as HTMLSelectElement).value as any)}>
-        <option value="config" ?selected=${(this._config.favorites_source ?? "config") === "config"}>config (YAML / shared store)</option>
-        <option value="music_assistant" ?selected=${this._config.favorites_source === "music_assistant"}>music_assistant (live library)</option>
-      </select>
-      <div class="help">With <code>music_assistant</code>, the Favorites view live-browses the MA library — favoriting in MA's UI is all the curation needed. Requires a Music Assistant entity mapping per room (Rooms section).</div>
     </div>
     <div class="row">
       <label>Track text scale (0.9–1.6)</label>
@@ -434,7 +393,7 @@ export class WallPanelSonosCardEditor
                     <textarea rows="2"
                       @change=${(e: Event) => this._updateFav(i, { media_content_id: (e.target as HTMLTextAreaElement).value.trim() || undefined })}
                       >${f.media_content_id ?? ""}</textarea>
-                    <div class="help">Get one via Developer Tools → Services → <code>media_player.play_media</code> → Choose media. Music Assistant URIs, Sonos favorite URIs, and Sonos Radio stream URIs all work.</div>
+                    <div class="help">Get one via Developer Tools → Services → <code>media_player.play_media</code> → Choose media. Sonos favorite URIs and Sonos Radio stream URIs both work.</div>
                   </div>
                   <div class="row">
                     <label>media_content_type</label>

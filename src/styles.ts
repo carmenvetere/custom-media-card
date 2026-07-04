@@ -79,7 +79,7 @@ export const cardStyles = css`
      Grid with 1fr/auto/1fr guarantees the title stays dead-centered
      regardless of how many buttons sit on either side. With plain flex
      + space-between the title floated toward whichever side had fewer
-     buttons — visible as soon as the Search icon was added. */
+     buttons — visible whenever the sides hold different button counts. */
   .hdr {
     display: grid;
     grid-template-columns: 1fr auto 1fr;
@@ -369,20 +369,6 @@ export const cardStyles = css`
     gap: 6px;
   }
   .fav-target b { white-space: nowrap; }
-  .fav-refresh {
-    margin-left: auto;
-    background: var(--wp-overlay-soft);
-    border: 0;
-    color: var(--wp-text);
-    width: 30px;
-    height: 30px;
-    border-radius: 50%;
-    cursor: pointer;
-    font-size: 15px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-  }
   .fav-empty {
     text-align: center;
     color: var(--wp-text-dim);
@@ -470,114 +456,6 @@ export const cardStyles = css`
     justify-content: center;
     color: var(--wp-text);
   }
-
-  /* SEARCH */
-  .search-bar {
-    position: relative;
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    margin-bottom: 12px;
-    background: var(--wp-overlay);
-    border-radius: var(--wp-radius-pill);
-    padding: 4px 8px 4px 14px;
-  }
-  .search-icon {
-    color: var(--wp-text-dim);
-    display: flex;
-    flex-shrink: 0;
-  }
-  .search-input {
-    flex: 1;
-    min-width: 0;
-    background: none;
-    border: 0;
-    color: var(--wp-text);
-    font: inherit;
-    font-size: 15px;
-    padding: 10px 0;
-    outline: none;
-  }
-  .search-input::placeholder { color: var(--wp-text-dim); }
-  .search-clear {
-    background: var(--wp-overlay-soft);
-    border: 0;
-    color: var(--wp-text);
-    width: 32px;
-    height: 32px;
-    border-radius: 50%;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    cursor: pointer;
-    flex-shrink: 0;
-  }
-  .search-list {
-    display: flex;
-    flex-direction: column;
-    gap: 6px;
-    overflow-y: auto;
-    min-height: 0;
-    flex: 1;
-    padding-right: 4px;
-  }
-  .search-item {
-    display: flex;
-    align-items: center;
-    gap: 14px;
-    padding: 10px 20px 10px 10px;
-    background: var(--wp-card-2);
-    border: 0;
-    border-radius: var(--wp-radius-pill);
-    cursor: pointer;
-    color: var(--wp-text);
-    text-align: left;
-    min-width: 0;
-    overflow: hidden;
-    box-sizing: border-box;
-  }
-  .search-art {
-    width: 44px;
-    height: 44px;
-    border-radius: var(--wp-radius-tile-sm);
-    flex-shrink: 0;
-    background-size: cover;
-    background-position: center;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    color: var(--wp-text);
-  }
-  .search-label {
-    flex: 1 1 0;
-    min-width: 0;
-    display: flex;
-    flex-direction: column;
-    gap: 2px;
-    overflow: hidden;
-  }
-  .search-title {
-    font-size: 15px;
-    font-weight: 500;
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-  }
-  .search-sub {
-    font-size: 12px;
-    color: var(--wp-text-dim);
-    text-transform: capitalize;
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-  }
-  .search-empty {
-    text-align: center;
-    color: var(--wp-text-dim);
-    padding: 40px 20px;
-    font-size: 14px;
-  }
-  .search-empty.error { color: var(--error-color, #cf6679); }
 
   /* GROUPING */
   .grp-banner {
@@ -788,8 +666,7 @@ export const cardStyles = css`
      ring. Applies to every interactive surface including the custom
      sliders (which are focusable via tabindex). */
   button:focus-visible,
-  .slider:focus-visible,
-  .search-input:focus-visible {
+  .slider:focus-visible {
     outline: 2px solid var(--wp-accent);
     outline-offset: 2px;
   }

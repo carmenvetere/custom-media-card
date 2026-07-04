@@ -35,15 +35,11 @@ jobs:
       - name: Build
         run: npm run build
 
-      # Verify the built bundles still register their custom elements —
+      # Verify the built bundle still registers both custom elements —
       # a bad import order or a lost side-effect import would silently
       # produce a bundle missing one of them, and neither typecheck nor
       # rollup would fail on that.
-      - name: Verify bundles export their elements
+      - name: Verify bundle exports both cards
         run: |
           grep -q 'wall-panel-sonos-card' dist/wall-panel-sonos-card.js
           grep -q 'wall-panel-sonos-mini-card' dist/wall-panel-sonos-card.js
-          grep -q 'wall-panel-sonos-panel' custom_components/wall_panel_sonos/panel.js
-
-      - name: Verify integration python parses
-        run: python3 -c "import ast; ast.parse(open('custom_components/wall_panel_sonos/__init__.py').read())"
