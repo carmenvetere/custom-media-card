@@ -64,6 +64,26 @@ export class WallPanelSonosCardEditor
         </select>
       </div>
       <div class="row">
+        <label>Favorites source</label>
+        <select @change=${(e: Event) => this._val("favorites_source", (e.target as HTMLSelectElement).value as any)}>
+          <option value="config" ?selected=${(this._config.favorites_source ?? "config") === "config"}>config (the favorites list below/in YAML)</option>
+          <option value="music_assistant" ?selected=${this._config.favorites_source === "music_assistant"}>music_assistant (live library, grouped by service &amp; type)</option>
+        </select>
+        <div class="help">With <code>music_assistant</code>, the Favorites view shows whatever is hearted in Music Assistant, organized by music service and type. Requires the mapping below.</div>
+      </div>
+      <div class="row">
+        <label>Music Assistant entities (native = MA twin, one per line)</label>
+        <textarea rows="4" @change=${(e: Event) => {
+          const map: Record<string, string> = {};
+          for (const line of (e.target as HTMLTextAreaElement).value.split("\n")) {
+            const [k, v] = line.split("=").map(s => s.trim());
+            if (k && v) map[k] = v;
+          }
+          this._val("ma_entities", Object.keys(map).length ? map : undefined);
+        }}>${Object.entries(this._config.ma_entities ?? {}).map(([k, v]) => `${k} = ${v}`).join("\n")}</textarea>
+        <div class="help">e.g. <code>media_player.living_room = media_player.living_room_2</code>. MA favorites play through the MA twin of the active room (same physical speaker).</div>
+      </div>
+      <div class="row">
         <label>Track text scale (0.9–1.6)</label>
         <input type="number" min="0.9" max="1.6" step="0.05"
           .value=${String(this._config.track_scale ?? 1.15)}

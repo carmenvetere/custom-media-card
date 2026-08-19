@@ -5,7 +5,7 @@ A Sonos multi-room control card for Home Assistant, designed for wall-mounted ta
 ## Features
 
 - **Player view** — cover, track meta, transport, volume slider sized for finger touch
-- **Favorites view** — single-column list with category pills (no on-screen search to avoid keyboards on wall panels)
+- **Favorites view** — single-column list with category pills (no on-screen search to avoid keyboards on wall panels). Optionally sourced live from Music Assistant, organized by music service and type
 - **Speakers view** — tap to add/remove rooms from the current group, with per-room volume sliders for the group
 - **Header dropdown** — tap the room name to switch active speaker or jump to a saved group
 - **Tweakable** — track text size and volume bar thickness configurable per-instance
@@ -83,7 +83,9 @@ favorites:
 | `entities` | string[] | yes | — | Sonos `media_player.*` entity IDs |
 | `names` | object | no | — | Map of `entity_id → friendly label` override |
 | `groups` | array | no | — | Saved groups shown in the room dropdown |
-| `favorites` | array | no | — | Items shown in the Favorites view |
+| `favorites` | array | no | — | Items shown in the Favorites view (`favorites_source: config`) |
+| `favorites_source` | string | no | `config` | `config` (the `favorites` list) or `music_assistant` (live MA library, grouped by service and type — see below) |
+| `ma_entities` | object | no | — | Map of native Sonos entity → Music Assistant twin. Required for `favorites_source: music_assistant` playback |
 | `default_view` | string | no | `player` | `player` / `favorites` / `grouping` |
 | `layout` | string | no | `wall` | `wall` (no search input) / `mobile` |
 | `track_scale` | number | no | `1.15` | Now-playing text scale (0.9–1.6) |
@@ -106,6 +108,22 @@ station_art:
 ```
 
 The first matching entry wins. To find the right `match` string, open Developer Tools → States while the station is playing and copy a stable substring out of `media_content_id`.
+
+### Favorites from Music Assistant
+
+With [Music Assistant](https://music-assistant.io/) installed (each Sonos room gets an MA twin entity), the card can source the Favorites view straight from the MA library instead of a hand-curated list:
+
+```yaml
+favorites_source: music_assistant
+ma_entities:                       # native Sonos → MA twin
+  media_player.living_room: media_player.living_room_2
+  media_player.kitchen: media_player.kitchen_2
+```
+
+- Anything **hearted in MA** (playlists, radio stations, albums) appears, **organized by music service** (Spotify, TuneIn, Local Library, …) **and type** — a service pill row plus the Playlists / Stations / Albums tabs. If nothing is hearted yet, the whole MA library is shown so the view isn't empty.
+- Items play through the MA twin of the active room — same physical speaker; the native Sonos entity keeps driving everything else (state, grouping, volume).
+- The list is fetched via the `music_assistant.get_library` action (falls back to media browsing on older MA versions, without service grouping) and cached for 5 minutes; the ↻ button refreshes on demand.
+- A room without an `ma_entities` mapping shows a hint and its items are disabled, so audio never starts in a different room.
 
 ### Favorite item
 

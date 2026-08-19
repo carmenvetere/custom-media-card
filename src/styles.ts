@@ -292,7 +292,68 @@ export const cardStyles = css`
     font-size: 14px;
     color: var(--wp-text-dim);
     padding: 2px 4px 10px;
+    display: flex;
+    align-items: center;
+    gap: 6px;
   }
+  .fav-refresh {
+    margin-left: auto;
+    background: rgba(255, 255, 255, 0.08);
+    border: 0;
+    color: var(--wp-text);
+    width: 30px;
+    height: 30px;
+    border-radius: 50%;
+    cursor: pointer;
+    font-size: 15px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+  .fav-notice {
+    font-size: 13px;
+    color: var(--wp-text-dim);
+    background: rgba(255, 255, 255, 0.06);
+    border-radius: 10px;
+    padding: 10px 12px;
+    margin-bottom: 10px;
+  }
+  .fav-notice b { color: var(--wp-accent); }
+  .fav-notice code { font-size: 12px; }
+  .fav-empty {
+    text-align: center;
+    color: var(--wp-text-dim);
+    padding: 40px 20px;
+    font-size: 15px;
+  }
+  .fav-empty.error { color: var(--error-color, #cf6679); }
+  .fav-svc-head {
+    font-size: 12px;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--wp-text-dim);
+    padding: 12px 4px 4px;
+  }
+  .fav-svc-head:first-child { padding-top: 0; }
+  .fav-text {
+    flex: 1 1 0;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 2px;
+  }
+  .fav-text .fav-label { flex: none; width: 100%; text-align: left; }
+  .fav-sub {
+    font-size: 12px;
+    color: var(--wp-text-dim);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 100%;
+  }
+  .fav-item[disabled] { opacity: 0.5; cursor: default; }
   .fav-target b {
     color: var(--wp-accent);
     font-weight: 600;

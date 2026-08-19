@@ -11,9 +11,20 @@ export interface WallPanelSonosCardConfig extends LovelaceCardConfig {
   names?: Record<string, string>;
   // Optional list of pre-built groups shown in the room dropdown.
   groups?: { id: string; label: string; entities: string[] }[];
-  // Optional list of favorites. If omitted, card will try
-  // media_player/browse_media on the active entity.
+  // Optional list of favorites shown in the Favorites view when
+  // favorites_source is "config" (the default).
   favorites?: FavoriteConfig[];
+  // Where the Favorites view gets its list. "config" (default) uses
+  // the `favorites` list above; "music_assistant" live-reads the MA
+  // library — heart something in MA's UI and it shows up here,
+  // organized by music service and type.
+  favorites_source?: "config" | "music_assistant";
+  // Map each native Sonos entity to its Music Assistant twin
+  // (media_player.living_room -> media_player.living_room_2 etc.).
+  // MA favorites must play through the MA entity; it outputs to the
+  // same physical speaker, while the native entity keeps providing
+  // room state (TV/line-in display, grouping, volume).
+  ma_entities?: Record<string, string>;
   // Default view when card mounts. 'player' | 'favorites' | 'grouping'
   default_view?: "player" | "favorites" | "grouping";
   // Visual tweaks
@@ -57,6 +68,32 @@ export interface FavoriteConfig {
 }
 
 export type ViewName = "player" | "favorites" | "grouping";
+
+// A node returned by the media_player/browse_media WebSocket command.
+// Used by the browse fallback for MA versions without get_library.
+export interface BrowseMediaNode {
+  title: string;
+  media_class?: string;
+  media_content_id?: string;
+  media_content_type?: string;
+  can_play?: boolean;
+  can_expand?: boolean;
+  thumbnail?: string;
+  children?: BrowseMediaNode[];
+}
+
+// A Music Assistant library item shown in the Favorites view.
+export interface MaFavorite {
+  title: string;
+  media_content_id: string;
+  media_content_type?: string;
+  thumbnail?: string;
+  // Which type tab it files under.
+  category: "playlist" | "station" | "album";
+  // Display name of the providing music service ("Spotify", "TuneIn",
+  // "Local Library", …) — the grouping key for the service sections.
+  service: string;
+}
 
 // HA media_player entity state shape (subset)
 export interface MediaPlayerState {
