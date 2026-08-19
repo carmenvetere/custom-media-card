@@ -26,7 +26,36 @@ import type {
   MediaPlayerState,
   FavoriteConfig,
   StationArt,
+  MaFavorite,
 } from "./types";
+import type { MaLibraryItem } from "./services";
+
+// Display names for Music Assistant provider domains. Unknown domains
+// fall back to a prettified version of the raw domain string.
+const MA_SERVICE_NAMES: Record<string, string> = {
+  spotify: "Spotify",
+  tidal: "Tidal",
+  qobuz: "Qobuz",
+  deezer: "Deezer",
+  apple_music: "Apple Music",
+  ytmusic: "YouTube Music",
+  soundcloud: "SoundCloud",
+  tunein: "TuneIn",
+  radiobrowser: "Radio",
+  plex: "Plex",
+  jellyfin: "Jellyfin",
+  subsonic: "Subsonic",
+  filesystem_local: "Local Library",
+  filesystem_smb: "Local Library",
+  builtin: "Local Library",
+  library: "Library",
+};
+const maServiceLabel = (raw: string): string =>
+  MA_SERVICE_NAMES[raw]
+  ?? raw.replace(/_/g, " ").replace(/\b\w/g, c => c.toUpperCase());
+// Provider domain of an MA uri, e.g. "spotify://playlist/x" → spotify.
+const maUriScheme = (uri: string | undefined): string | undefined =>
+  uri?.match(/^([a-z0-9_]+):\/\//i)?.[1]?.toLowerCase();
 
 const fmt = (s: number) => {
   if (!isFinite(s) || s < 0) s = 0;
@@ -50,6 +79,15 @@ export class WallPanelSonosCard extends LitElement implements LovelaceCard {
   @state() private _menuOpen = false;
   @state() private _favTab: "All" | "Playlists" | "Stations" | "Albums" = "All";
   @state() private _favQ = "";
+  // Music Assistant favorites (favorites_source: music_assistant).
+  // Snapshot of the MA library, cached for a few minutes; the service
+  // pill row filters by provider ("All" = grouped sections per service).
+  @state() private _maFavs: MaFavorite[] | null = null;
+  @state() private _maFavsLoading = false;
+  @state() private _maFavsError: string | null = null;
+  @state() private _maSvc: string = "All";
+  private _maFavsFetchedAt = 0;
+  private static readonly MA_FAVS_TTL_MS = 5 * 60 * 1000;
   // Per-entity slider value held while the user drags AND briefly after
   // release, so the knob tracks the finger and doesn't snap back to the
   // stale hass value before the volume_set service round-trips.
@@ -303,6 +341,9 @@ export class WallPanelSonosCard extends LitElement implements LovelaceCard {
       }
     }
     if (nextDrag) this._dragVol = nextDrag;
+    // Covers default_view: favorites (no _setView call ever fires) —
+    // the guards inside make this a cheap no-op on every other update.
+    if (this._view === "favorites") this._maybeFetchMaFavorites();
   }
 
   // ── Derived state from hass ───────────────────────────────────────
@@ -374,6 +415,7 @@ export class WallPanelSonosCard extends LitElement implements LovelaceCard {
   private _setView(v: ViewName) {
     this._view = (this._view === v && v !== "player") ? "player" : v;
     this._menuOpen = false;
+    if (this._view === "favorites") this._maybeFetchMaFavorites();
   }
   private _onTitleClick() {
     if (this._view !== "player") this._view = "player";
@@ -823,6 +865,10 @@ export class WallPanelSonosCard extends LitElement implements LovelaceCard {
   }
 
   private _renderFavorites() {
+    if (this._config.favorites_source === "music_assistant") {
+      return this._renderMaFavorites();
+    }
+    const cfg = this._config.favorites ?? [];
     const tabs: Array<typeof this._favTab> = ["All", "Playlists", "Stations", "Albums"];
     const groupSize = this._groupMembers().length;
     const tabType = this._favTab === "Playlists" ? "playlist"
@@ -858,6 +904,240 @@ export class WallPanelSonosCard extends LitElement implements LovelaceCard {
                 <span class="fav-label">${f.name}</span>
               </button>
             `)}
+        </div>
+      </div>
+    `;
+  }
+
+  // ── Music Assistant favorites ─────────────────────────────────────
+  // The MA twin of a native Sonos entity. MA items must play through
+  // the MA entity; it outputs to the same physical speaker while the
+  // native entity keeps providing room state.
+  private _maEntity(roomId: string): string | undefined {
+    return this._config.ma_entities?.[roomId];
+  }
+  private _anyMaEntity(): string | undefined {
+    const map = this._config.ma_entities ?? {};
+    return map[this._activeRoom] ?? Object.values(map)[0];
+  }
+  private _maybeFetchMaFavorites(force = false) {
+    if (this._config?.favorites_source !== "music_assistant") return;
+    if (this._maFavsLoading) return;
+    const fresh = Date.now() - this._maFavsFetchedAt < WallPanelSonosCard.MA_FAVS_TTL_MS;
+    // Errors are cached too so a failing backend isn't hammered on
+    // every hass update while the view is open.
+    if (!force && fresh && (this._maFavs || this._maFavsError)) return;
+    void this._fetchMaFavorites();
+  }
+  private async _fetchMaFavorites() {
+    this._maFavsLoading = true;
+    this._maFavsError = null;
+    try {
+      let items: MaFavorite[];
+      try {
+        items = await this._fetchMaViaLibrary();
+      } catch {
+        // Older MA without the get_library action (or a response shape
+        // we couldn't read) — browse the media tree instead. No
+        // provider info there, so everything files under "Library".
+        items = await this._fetchMaViaBrowse();
+      }
+      // Stable order: service A→Z, then playlists / stations / albums,
+      // then title — this is the "organized by service and type" spine.
+      const catOrder = { playlist: 0, station: 1, album: 2 };
+      items.sort((a, b) =>
+        a.service.localeCompare(b.service)
+        || catOrder[a.category] - catOrder[b.category]
+        || a.title.localeCompare(b.title));
+      this._maFavs = items;
+      // Drop a service filter that no longer exists after a refresh.
+      if (this._maSvc !== "All" && !items.some(i => i.service === this._maSvc)) {
+        this._maSvc = "All";
+      }
+    } catch (err) {
+      this._maFavsError = `Couldn't load the Music Assistant library: ${err instanceof Error ? err.message : err}`;
+    } finally {
+      this._maFavsFetchedAt = Date.now();
+      this._maFavsLoading = false;
+    }
+  }
+  // Primary path: music_assistant.get_library, which carries per-item
+  // provider info — the basis for the service grouping. Hearted items
+  // only; if nothing is hearted at all, fall back to the whole library
+  // so a fresh MA install still shows something useful.
+  private async _fetchMaViaLibrary(): Promise<MaFavorite[]> {
+    const entry = await Svc.maConfigEntryId(this.hass);
+    const TYPES: [string, MaFavorite["category"]][] = [
+      ["playlist", "playlist"],
+      ["radio", "station"],
+      ["album", "album"],
+    ];
+    const fetchSet = async (favoriteOnly: boolean) => {
+      const out: MaFavorite[] = [];
+      for (const [mediaType, category] of TYPES) {
+        const items = await Svc.maGetLibrary(this.hass, entry, mediaType, favoriteOnly);
+        for (const it of items) {
+          const fav = this._maLibraryItemToFavorite(it, category);
+          if (fav) out.push(fav);
+        }
+      }
+      return out;
+    };
+    const hearted = await fetchSet(true);
+    return hearted.length ? hearted : fetchSet(false);
+  }
+  private _maLibraryItemToFavorite(
+    it: MaLibraryItem,
+    category: MaFavorite["category"],
+  ): MaFavorite | null {
+    if (typeof it.uri !== "string" || typeof it.name !== "string") return null;
+    // Provider precedence: a provider-specific uri scheme beats the
+    // `provider` field (which is often just "library"), which beats
+    // the first provider mapping.
+    const scheme = maUriScheme(it.uri);
+    const raw = (scheme && scheme !== "library" ? scheme : undefined)
+      ?? (it.provider && it.provider !== "library" ? it.provider : undefined)
+      ?? it.provider_mappings?.find(m => m.provider_domain)?.provider_domain
+      ?? "library";
+    // Image is a plain URL in some MA releases, {path: ...} in others.
+    const img = typeof it.image === "string"
+      ? it.image
+      : typeof (it.image as { path?: unknown } | undefined)?.path === "string"
+        ? (it.image as { path: string }).path
+        : undefined;
+    return {
+      title: it.name,
+      media_content_id: it.uri,
+      media_content_type: it.media_type ?? category,
+      // Only http(s) images render from the card; provider-internal
+      // paths fall back to the category icon.
+      thumbnail: img && /^https?:\/\//i.test(img) ? img : undefined,
+      category,
+      service: maServiceLabel(raw),
+    };
+  }
+  // Fallback: browse the MA entity's media tree (playlists / radio /
+  // albums sections under the root).
+  private async _fetchMaViaBrowse(): Promise<MaFavorite[]> {
+    const ma = this._anyMaEntity();
+    if (!ma) throw new Error("no ma_entities configured");
+    const root = await Svc.browseMedia(this.hass, ma);
+    const sections: [RegExp, MaFavorite["category"]][] = [
+      [/playlist/i, "playlist"],
+      [/radio|station/i, "station"],
+      [/album/i, "album"],
+    ];
+    const items: MaFavorite[] = [];
+    for (const child of root.children ?? []) {
+      const section = sections.find(([re]) =>
+        re.test(child.title) || re.test(child.media_content_id ?? ""));
+      if (!section || !child.can_expand) continue;
+      const node = await Svc.browseMedia(
+        this.hass, ma, child.media_content_id, child.media_content_type);
+      for (const it of node.children ?? []) {
+        if (!it.can_play || !it.media_content_id) continue;
+        items.push({
+          title: it.title,
+          media_content_id: it.media_content_id,
+          media_content_type: it.media_content_type,
+          thumbnail: it.thumbnail,
+          category: section[1],
+          service: "Library",
+        });
+      }
+    }
+    return items;
+  }
+  private _playMaFavorite(f: MaFavorite) {
+    // Never fall back to another room's MA entity — that would start
+    // audio in the wrong room. The view shows a mapping hint instead.
+    const target = this._maEntity(this._activeRoom);
+    if (!target) return;
+    Svc.playMedia(this.hass, target, f.media_content_id, f.media_content_type ?? "music");
+    this._prevTitle = this._state(this._activeRoom)?.attributes.media_title;
+    this._loadingName = f.title;
+    if (this._loadingTimer) clearTimeout(this._loadingTimer);
+    this._loadingTimer = setTimeout(() => { this._loadingName = null; }, 8000);
+    this._view = "player";
+  }
+  private _renderMaFavorites() {
+    const groupSize = this._groupMembers().length;
+    const unmapped = !this._maEntity(this._activeRoom);
+    const items = this._maFavs ?? [];
+    const services = [...new Set(items.map(i => i.service))].sort();
+    const tabs: Array<typeof this._favTab> = ["All", "Playlists", "Stations", "Albums"];
+    const tabType = this._favTab === "Playlists" ? "playlist"
+      : this._favTab === "Stations" ? "station"
+      : this._favTab === "Albums" ? "album"
+      : null;
+    const filtered = items.filter(f =>
+      (!tabType || f.category === tabType)
+      && (this._maSvc === "All" || f.service === this._maSvc));
+    // Grouped sections per service when no service filter is active
+    // (items are already sorted service → type → title).
+    const sections: [string, MaFavorite[]][] = [];
+    for (const f of filtered) {
+      const last = sections[sections.length - 1];
+      if (last && last[0] === f.service) last[1].push(f);
+      else sections.push([f.service, [f]]);
+    }
+    const showHeads = this._maSvc === "All" && sections.length > 1;
+
+    return html`
+      <div class="pv pv-scroll">
+        <div class="fav-target">
+          <span>Play to <b>${this._label(this._activeRoom)}${groupSize > 1 ? ` +${groupSize - 1}` : ""}</b></span>
+          <button class="fav-refresh" aria-label="Refresh from Music Assistant"
+            @click=${() => this._maybeFetchMaFavorites(true)}>↻</button>
+        </div>
+        ${unmapped ? html`
+          <div class="fav-notice">No Music Assistant player is mapped for
+            <b>${this._label(this._activeRoom)}</b> — add it under
+            <code>ma_entities</code> to play these here.</div>
+        ` : nothing}
+        ${services.length > 1 ? html`
+          <div class="tabs svc">
+            ${["All", ...services].map(sv => html`
+              <button class=${classMap({ tab: true, active: this._maSvc === sv })}
+                      @click=${() => this._maSvc = sv}>${sv}</button>
+            `)}
+          </div>
+        ` : nothing}
+        <div class="tabs">
+          ${tabs.map(tb => html`
+            <button class=${classMap({ tab: true, active: this._favTab === tb })}
+                    @click=${() => this._favTab = tb}>${tb}</button>
+          `)}
+        </div>
+        <div class="fav-list">
+          ${this._maFavsError
+            ? html`<div class="fav-empty error">${this._maFavsError}</div>`
+            : !this._maFavs
+              ? html`<div class="fav-empty">Loading Music Assistant library…</div>`
+              : filtered.length === 0
+                ? html`<div class="fav-empty">Nothing here yet — heart playlists, stations, or albums in Music Assistant and they'll appear.</div>`
+                : sections.map(([service, list]) => html`
+                  ${showHeads ? html`<div class="fav-svc-head">${service}</div>` : nothing}
+                  ${list.map(f => html`
+                    <button class="fav-item" ?disabled=${unmapped}
+                            @click=${() => this._playMaFavorite(f)}>
+                      <span class="fav-art" style=${styleMap({
+                        background: f.thumbnail
+                          ? `center / cover no-repeat url("${f.thumbnail}")`
+                          : "linear-gradient(135deg,#4a5d72,#2a3540)" })}>
+                        ${f.thumbnail ? nothing
+                          : f.category === "station" ? iconStation
+                          : f.category === "album" ? iconAlbum
+                          : iconPlaylist}
+                      </span>
+                      <span class="fav-text">
+                        <span class="fav-label">${f.title}</span>
+                        <span class="fav-sub">${f.category === "station" ? "Station"
+                          : f.category === "album" ? "Album" : "Playlist"}${this._maSvc === "All" && !showHeads ? ` · ${f.service}` : ""}</span>
+                      </span>
+                    </button>
+                  `)}
+                `)}
         </div>
       </div>
     `;

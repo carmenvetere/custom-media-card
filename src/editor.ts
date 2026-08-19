@@ -285,155 +285,37 @@ export class WallPanelSonosCardEditor
           ${available.map(id => html`<option value=${id}>${id}</option>`)}
         </select>
       </div>
-    `;
-  };
-
-  // ── Options ────────────────────────────────────────────────────────
-  private _renderOptions = () => html`
-    <div class="row">
-      <label>Default view</label>
-      <select @change=${(e: Event) => this._val("default_view", (e.target as HTMLSelectElement).value as any)}>
-        ${["player","favorites","grouping"].map(v => html`
-          <option value=${v} ?selected=${this._config.default_view === v}>${v}</option>
-        `)}
-      </select>
-    </div>
-    <div class="row">
-      <label>Layout</label>
-      <select @change=${(e: Event) => this._val("layout", (e.target as HTMLSelectElement).value as any)}>
-        <option value="wall" ?selected=${(this._config.layout ?? "wall") === "wall"}>wall</option>
-        <option value="mobile" ?selected=${this._config.layout === "mobile"}>mobile</option>
-      </select>
-    </div>
-    <div class="row">
-      <label>Track text scale (0.9–1.6)</label>
-      <input type="number" min="0.9" max="1.6" step="0.05"
-        .value=${String(this._config.track_scale ?? 1.15)}
-        @change=${(e: Event) => this._val("track_scale", parseFloat((e.target as HTMLInputElement).value))}/>
-    </div>
-    <div class="row">
-      <label>Volume bar scale (1.0–2.5)</label>
-      <input type="number" min="1" max="2.5" step="0.1"
-        .value=${String(this._config.vol_bar_scale ?? 1.4)}
-        @change=${(e: Event) => this._val("vol_bar_scale", parseFloat((e.target as HTMLInputElement).value))}/>
-    </div>
-    <div class="row">
-      <label>Max volume cap (1–100)</label>
-      <input type="number" min="1" max="100" step="1"
-        .value=${String(this._config.max_volume ?? 100)}
-        @change=${(e: Event) => this._val("max_volume", parseInt((e.target as HTMLInputElement).value, 10))}/>
-      <div class="help">Set below 100 to give the slider finer resolution at low volumes.</div>
-    </div>
-  `;
-
-  // ── Favorites ──────────────────────────────────────────────────────
-  private _updateFav(idx: number, patch: Partial<FavoriteConfig>) {
-    const list = (this._config.favorites ?? []).map((f, j) =>
-      j === idx ? { ...f, ...patch } : f);
-    this._setList("favorites", list);
-  }
-  private _renderFavorites = () => {
-    const favs = this._config.favorites ?? [];
-    const scripts = this._scriptOptions();
-    return html`
-      ${favs.map((f, i) => {
-        const key = `fav:${i}`;
-        const open = !!this._openItem[key];
-        const mode: "media" | "script" = f.script ? "script" : "media";
-        return html`
-          <div class="item">
-            <div class="item-head" @click=${() => this._toggleItem(key)}>
-              <span>${open ? "▾" : "▸"}</span>
-              <span class="name">${f.name || f.id || "(untitled)"}</span>
-              <span class="count">${f.type ?? ""}</span>
-              <div class="actions" @click=${(e: Event) => e.stopPropagation()}>
-                <button class="btn btn-mini" ?disabled=${i === 0}
-                  @click=${() => this._setList("favorites", this._moveItem(favs, i, -1))}>↑</button>
-                <button class="btn btn-mini" ?disabled=${i === favs.length - 1}
-                  @click=${() => this._setList("favorites", this._moveItem(favs, i, 1))}>↓</button>
-                <button class="btn btn-mini danger"
-                  @click=${() => this._setList("favorites", favs.filter((_, j) => j !== i))}>Remove</button>
-              </div>
-            </div>
-            ${open ? html`
-              <div class="item-body">
-                <div class="row-inline">
-                  <div>
-                    <label>ID</label>
-                    <input type="text" .value=${f.id ?? ""}
-                      @change=${(e: Event) => this._updateFav(i, { id: (e.target as HTMLInputElement).value.trim() })}/>
-                  </div>
-                  <div>
-                    <label>Name</label>
-                    <input type="text" .value=${f.name ?? ""}
-                      @change=${(e: Event) => this._updateFav(i, { name: (e.target as HTMLInputElement).value })}/>
-                  </div>
-                </div>
-                <div class="row">
-                  <label>Type</label>
-                  <div class="chip-list">
-                    ${(["playlist","station","album"] as const).map(t => html`
-                      <span class="chip ${f.type === t ? "on" : ""}"
-                        @click=${() => this._updateFav(i, { type: t })}>${t}</span>
-                    `)}
-                  </div>
-                </div>
-                <div class="row">
-                  <label>Source</label>
-                  <div class="chip-list">
-                    <span class="chip ${mode === "media" ? "on" : ""}"
-                      @click=${() => this._updateFav(i, { script: undefined })}>media_content_id</span>
-                    <span class="chip ${mode === "script" ? "on" : ""}"
-                      @click=${() => this._updateFav(i, { media_content_id: undefined, media_content_type: undefined })}>script</span>
-                  </div>
-                </div>
-                ${mode === "media" ? html`
-                  <div class="row">
-                    <label>media_content_id</label>
-                    <textarea rows="2"
-                      @change=${(e: Event) => this._updateFav(i, { media_content_id: (e.target as HTMLTextAreaElement).value.trim() || undefined })}
-                      >${f.media_content_id ?? ""}</textarea>
-                    <div class="help">Get one via Developer Tools → Services → <code>media_player.play_media</code> → Choose media. Sonos favorite URIs and Sonos Radio stream URIs both work.</div>
-                  </div>
-                  <div class="row">
-                    <label>media_content_type</label>
-                    <input type="text" .value=${f.media_content_type ?? ""}
-                      placeholder="music"
-                      @change=${(e: Event) => this._updateFav(i, { media_content_type: (e.target as HTMLInputElement).value.trim() || undefined })}/>
-                  </div>
-                ` : html`
-                  <div class="row">
-                    <label>Script</label>
-                    <select
-                      @change=${(e: Event) => this._updateFav(i, { script: (e.target as HTMLSelectElement).value || undefined })}>
-                      <option value="">— pick a script.* —</option>
-                      ${scripts.map(s => html`<option value=${s} ?selected=${f.script === s}>${s}</option>`)}
-                    </select>
-                    <div class="help">The script receives <code>entity_id</code> (active room) and <code>group_members</code> as service fields.</div>
-                  </div>
-                `}
-                <div class="row">
-                  <label>Art (URL or CSS gradient, optional)</label>
-                  <textarea rows="2"
-                    placeholder="linear-gradient(135deg, #1a1a1a 0%, #6a4a2c 100%)"
-                    @change=${(e: Event) => this._updateFav(i, { art: (e.target as HTMLTextAreaElement).value.trim() || undefined })}
-                    >${f.art ?? ""}</textarea>
-                </div>
-              </div>
-            ` : nothing}
-          </div>
-        `;
-      })}
-      <div class="adder">
-        <button class="btn primary" @click=${() => {
-          const next: FavoriteConfig = {
-            id: `favorite_${(favs.length + 1)}`,
-            name: "New favorite",
-            type: "playlist",
-          };
-          this._setList("favorites", [...favs, next]);
-          this._openItem = { ...this._openItem, [`fav:${favs.length}`]: true };
-        }}>+ Add favorite</button>
+      <div class="row">
+        <label>Favorites source</label>
+        <select @change=${(e: Event) => this._val("favorites_source", (e.target as HTMLSelectElement).value as any)}>
+          <option value="config" ?selected=${(this._config.favorites_source ?? "config") === "config"}>config (the favorites list below/in YAML)</option>
+          <option value="music_assistant" ?selected=${this._config.favorites_source === "music_assistant"}>music_assistant (live library, grouped by service &amp; type)</option>
+        </select>
+        <div class="help">With <code>music_assistant</code>, the Favorites view shows whatever is hearted in Music Assistant, organized by music service and type. Requires the mapping below.</div>
+      </div>
+      <div class="row">
+        <label>Music Assistant entities (native = MA twin, one per line)</label>
+        <textarea rows="4" @change=${(e: Event) => {
+          const map: Record<string, string> = {};
+          for (const line of (e.target as HTMLTextAreaElement).value.split("\n")) {
+            const [k, v] = line.split("=").map(s => s.trim());
+            if (k && v) map[k] = v;
+          }
+          this._val("ma_entities", Object.keys(map).length ? map : undefined);
+        }}>${Object.entries(this._config.ma_entities ?? {}).map(([k, v]) => `${k} = ${v}`).join("\n")}</textarea>
+        <div class="help">e.g. <code>media_player.living_room = media_player.living_room_2</code>. MA favorites play through the MA twin of the active room (same physical speaker).</div>
+      </div>
+      <div class="row">
+        <label>Track text scale (0.9–1.6)</label>
+        <input type="number" min="0.9" max="1.6" step="0.05"
+          .value=${String(this._config.track_scale ?? 1.15)}
+          @change=${(e: Event) => this._val("track_scale", parseFloat((e.target as HTMLInputElement).value))}/>
+      </div>
+      <div class="row">
+        <label>Volume bar scale (1.0–2.5)</label>
+        <input type="number" min="1" max="2.5" step="0.1"
+          .value=${String(this._config.vol_bar_scale ?? 1.4)}
+          @change=${(e: Event) => this._val("vol_bar_scale", parseFloat((e.target as HTMLInputElement).value))}/>
       </div>
     `;
   };
