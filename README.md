@@ -8,6 +8,8 @@ A Sonos multi-room control card for Home Assistant, designed for wall-mounted ta
 - **Favorites view** — single-column list with category pills (no on-screen search to avoid keyboards on wall panels). Optionally sourced live from Music Assistant, organized by music service and type
 - **Speakers view** — tap to add/remove rooms from the current group, with per-room volume sliders for the group
 - **Header dropdown** — tap the room name to switch active speaker or jump to a saved group
+- **Instant touch response** — transport and mute fire on press (pointerdown), not release, and every state change renders optimistically before the Sonos round-trip completes
+- **Accessible** — full aria labeling, keyboard-operable sliders (arrow keys / Home / End), visible focus rings for keyboard navigation
 - **Tweakable** — track text size and volume bar thickness configurable per-instance
 - Dark theme by default, matching dusty-blue / sage accent palette
 
@@ -75,6 +77,28 @@ favorites:
     script: script.play_pool_mix
     art: "linear-gradient(135deg, #00b3a4 0%, #f4d35e 100%)"
 ```
+
+## Companion: Sonos Mini Card
+
+The bundle also registers `custom:wall-panel-sonos-mini-card` — a compact "Now Playing" tile sized for a home dashboard alongside weather / scene cards. Hides itself entirely when no configured entity is playing or paused. Tapping the art / text / room label fires a navigate action so a tap takes you to the full card.
+
+```yaml
+type: custom:wall-panel-sonos-mini-card
+navigation_path: /lovelace/music
+volume_step: 5
+entities:
+  - media_player.living_room
+  - media_player.kitchen
+  - media_player.primary_bedroom
+# Optional — same shape as the full card. Duplicate the entries here if
+# you want the mini tile to show custom art for metadata-less streams.
+station_art:
+  - match: "stationId=s297990"
+    name: "MSNBC Now"
+    image: "https://upload.wikimedia.org/wikipedia/commons/1/15/MSNBC_2015_logo.svg"
+```
+
+The mini card uses the same metadata fallbacks as the full card: it borrows title/art from the group coordinator when the picked entity is a slave, extracts the streaming source from `media_content_id` when HA doesn't expose one, and respects `station_art` when supplied.
 
 ## Config reference
 
@@ -160,19 +184,26 @@ Override any of the CSS custom properties via a `card-mod` block or a custom the
 --wp-pill-on-active     /* secondary pill over an accent surface */
 --wp-accent-soft        /* "in group" row tint — color-mix of --wp-accent */
 
-/* Shadows */
+/* Shadows — outer card + cover fall back to HA's --ha-card-box-shadow
+   when the theme sets one, so a theme with its own elevation shows through. */
 --wp-shadow-card
 --wp-shadow-cover
 --wp-shadow-play
 --wp-shadow-menu
 
-/* Geometry & scale */
---wp-radius
---wp-radius-pill
+/* Geometry — outer radius follows the HA theme's --ha-card-border-radius.
+   Interior tiles derive from two smaller stops so a theme aiming for a
+   flatter or more-rounded language can shift them independently. Pill
+   (999px) and round-button (50%) shapes stay hard-coded — they're
+   structural, not decorative. */
+--wp-radius            /* outer card, falls back to --ha-card-border-radius, 28px */
+--wp-radius-tile       /* cover, menu card, group volumes panel */
+--wp-radius-tile-sm    /* menu items, favorite art tile, banner */
+--wp-radius-pill       /* fav rows, group rows */
 --wp-track-scale
 --wp-vol-scale
 ```
 
 ## Status
 
-v0.1.0 — initial release. Visual editor covers core fields; `favorites` / `groups` still YAML-only.
+Visual editor now covers rooms, options, favorites, groups, and station art — YAML remains a fully supported path for power users. Service-call failures (bad `media_content_id`, unknown script, offline speaker) surface as a red banner at the top of the card for 5 seconds.

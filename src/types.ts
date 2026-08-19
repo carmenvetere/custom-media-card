@@ -9,7 +9,8 @@ export interface WallPanelSonosCardConfig extends LovelaceCardConfig {
   entities: string[];
   // Optional friendly name override per entity (id -> label).
   names?: Record<string, string>;
-  // Optional list of pre-built groups shown in the room dropdown.
+  // Optional list of pre-built groups shown in the room dropdown and
+  // as quick-select pills in the Speakers view.
   groups?: { id: string; label: string; entities: string[] }[];
   // Optional list of favorites shown in the Favorites view when
   // favorites_source is "config" (the default).

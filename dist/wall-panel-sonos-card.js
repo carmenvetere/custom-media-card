@@ -20,12 +20,21 @@ function t(t,e,i,s){var r,a=arguments.length,o=a<3?e:null===s?s=Object.getOwnPro
        back via the second declaration for the rare browser without it. */
     --wp-accent-soft: rgba(142, 177, 191, 0.45);
     --wp-accent-soft: color-mix(in srgb, var(--wp-accent) 45%, transparent);
-    /* Shadows */
-    --wp-shadow-card: 0 8px 32px rgba(0, 0, 0, 0.18);
-    --wp-shadow-cover: 0 8px 32px rgba(0, 0, 0, 0.35);
+    /* Shadows. Card + cover fall back to the HA theme's --ha-card-box-shadow
+       so a theme with a distinctive elevation shows through; the pixel
+       defaults keep the current look when no theme sets it. */
+    --wp-shadow-card: var(--ha-card-box-shadow, 0 8px 32px rgba(0, 0, 0, 0.18));
+    --wp-shadow-cover: var(--ha-card-box-shadow, 0 8px 32px rgba(0, 0, 0, 0.35));
     --wp-shadow-play: 0 4px 16px rgba(0, 0, 0, 0.25);
     --wp-shadow-menu: 0 16px 40px rgba(0, 0, 0, 0.5);
-    --wp-radius: 28px;
+    /* Radii. Outer card follows the HA theme's --ha-card-border-radius;
+       interior tiles derive from two smaller stops. Themes wanting a
+       consistent rounded-rectangle language can override any of these
+       independently. Pill (999px) and round (50%) shapes stay hard-coded
+       — those are structural, not decorative. */
+    --wp-radius: var(--ha-card-border-radius, 28px);
+    --wp-radius-tile: 18px;
+    --wp-radius-tile-sm: 12px;
     --wp-radius-pill: 999px;
     --wp-track-scale: 1.15;
     --wp-vol-scale: 1.4;
@@ -63,15 +72,25 @@ function t(t,e,i,s){var r,a=arguments.length,o=a<3?e:null===s?s=Object.getOwnPro
     min-height: 600px;
   }
 
-  /* HEADER */
+  /* HEADER
+     Grid with 1fr/auto/1fr guarantees the title stays dead-centered
+     regardless of how many buttons sit on either side. With plain flex
+     + space-between the title floated toward whichever side had fewer
+     buttons — visible whenever the sides hold different button counts. */
   .hdr {
-    display: flex;
+    display: grid;
+    grid-template-columns: 1fr auto 1fr;
     align-items: center;
-    justify-content: space-between;
     gap: 10px;
     padding: 14px 18px 12px;
     flex-shrink: 0;
   }
+  .hdr-side {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .hdr-side.right { justify-content: flex-end; }
   .hdr-btn {
     width: 44px;
     height: 44px;
@@ -100,7 +119,7 @@ function t(t,e,i,s){var r,a=arguments.length,o=a<3?e:null===s?s=Object.getOwnPro
     font-size: 23px;
     font-weight: 600;
     padding: 6px 12px;
-    border-radius: 14px;
+    border-radius: var(--wp-radius-tile-sm);
     transition: background 0.15s;
   }
   .hdr-title.menu-open {
@@ -118,6 +137,38 @@ function t(t,e,i,s){var r,a=arguments.length,o=a<3?e:null===s?s=Object.getOwnPro
   }
   .chev.up {
     transform: rotate(180deg);
+  }
+
+  /* TOAST — service-call failure banner. Auto-clears after 5s.
+     Kept inline in the .root flex flow so it pushes the view down
+     rather than covering the header. */
+  .toast {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin: 0 22px 8px;
+    padding: 10px 14px;
+    background: var(--error-color, #cf6679);
+    color: var(--wp-bg);
+    border-radius: var(--wp-radius-tile-sm);
+    font-size: 13px;
+    animation: toast-in 0.15s ease-out;
+  }
+  .toast-msg { flex: 1; min-width: 0; }
+  .toast-x {
+    background: none;
+    border: 0;
+    color: inherit;
+    font-size: 20px;
+    line-height: 1;
+    cursor: pointer;
+    padding: 0 4px;
+    opacity: 0.75;
+  }
+  .toast-x:hover { opacity: 1; }
+  @keyframes toast-in {
+    from { opacity: 0; transform: translateY(-4px); }
+    to   { opacity: 1; transform: translateY(0); }
   }
 
   /* PLAYER */
@@ -165,7 +216,7 @@ function t(t,e,i,s){var r,a=arguments.length,o=a<3?e:null===s?s=Object.getOwnPro
     height: clamp(140px, 36vh, 240px);
     max-height: 100%;
     max-width: 100%;
-    border-radius: 18px;
+    border-radius: var(--wp-radius-tile);
     overflow: hidden;
     background-size: cover;
     background-position: center;
@@ -248,6 +299,27 @@ function t(t,e,i,s){var r,a=arguments.length,o=a<3?e:null===s?s=Object.getOwnPro
   .vol-icon {
     display: flex;
     flex-shrink: 0;
+  }
+  /* The volume icon doubles as the mute toggle. */
+  .mute-btn {
+    background: none;
+    border: 0;
+    color: var(--wp-text);
+    cursor: pointer;
+    padding: 6px;
+    margin: -6px;
+    border-radius: 50%;
+    align-items: center;
+    justify-content: center;
+  }
+  /* Dim the whole volume row while muted so the state is readable at
+     a glance from across the room. */
+  .vol-row.muted .slider,
+  .vol-row.muted .vol-num {
+    opacity: 0.35;
+  }
+  .vol-row.muted .mute-btn {
+    color: var(--wp-accent);
   }
   .vol-num {
     flex-shrink: 0;
@@ -422,7 +494,7 @@ function t(t,e,i,s){var r,a=arguments.length,o=a<3?e:null===s?s=Object.getOwnPro
   .fav-art {
     width: 44px;
     height: 44px;
-    border-radius: 8px;
+    border-radius: var(--wp-radius-tile-sm);
     flex-shrink: 0;
     background-size: cover;
     background-position: center;
@@ -439,7 +511,7 @@ function t(t,e,i,s){var r,a=arguments.length,o=a<3?e:null===s?s=Object.getOwnPro
     align-items: center;
     padding: 10px 14px;
     background: var(--wp-overlay);
-    border-radius: 14px;
+    border-radius: var(--wp-radius-tile-sm);
     margin-bottom: 12px;
     gap: 14px;
   }
@@ -488,6 +560,15 @@ function t(t,e,i,s){var r,a=arguments.length,o=a<3?e:null===s?s=Object.getOwnPro
     background: var(--wp-accent-soft);
     color: var(--wp-bg);
   }
+  /* Optimistic state: tap registered, join/unjoin still in flight.
+     Gentle pulse tells the user the change is being applied. */
+  .grp-row.pending {
+    animation: grp-pending 1s ease-in-out infinite;
+  }
+  @keyframes grp-pending {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.6; }
+  }
   .grp-row.primary {
     background: var(--wp-accent);
     color: var(--wp-bg);
@@ -507,7 +588,7 @@ function t(t,e,i,s){var r,a=arguments.length,o=a<3?e:null===s?s=Object.getOwnPro
     margin-top: 14px;
     padding: 14px 16px;
     background: var(--wp-overlay);
-    border-radius: 16px;
+    border-radius: var(--wp-radius-tile);
   }
   .grp-volumes-title {
     font-size: 11px;
@@ -551,7 +632,7 @@ function t(t,e,i,s){var r,a=arguments.length,o=a<3?e:null===s?s=Object.getOwnPro
   .menu-card {
     width: min(92%, 380px);
     background: var(--wp-card-2);
-    border-radius: 18px;
+    border-radius: var(--wp-radius-tile);
     padding: 8px;
     box-shadow: var(--wp-shadow-menu);
     max-height: 80%;
@@ -575,7 +656,7 @@ function t(t,e,i,s){var r,a=arguments.length,o=a<3?e:null===s?s=Object.getOwnPro
     color: var(--wp-text);
     border: 0;
     cursor: pointer;
-    border-radius: 12px;
+    border-radius: var(--wp-radius-tile-sm);
     font-size: 15px;
     font-weight: 500;
   }
@@ -652,6 +733,13 @@ function t(t,e,i,s){var r,a=arguments.length,o=a<3?e:null===s?s=Object.getOwnPro
                 @click=${()=>this._setView("grouping")} aria-label="Speakers">
           ${Ht}
         </button>
+        <div class="hdr-side right">
+          <button class=${bt({"hdr-btn":!0,active:"grouping"===this._view})}
+                  @click=${()=>this._setView("grouping")}
+                  aria-label="Speakers" aria-pressed=${"grouping"===this._view}>
+            ${Vt}
+          </button>
+        </div>
       </div>
     `}_renderPlayer(t){const e=t.attributes,i=e.media_title||e.entity_picture?e:this._coordinatorMeta(e.group_members)??e,s=i.media_duration??0,r=this._optimisticPlaying??"playing"===t.state,a=Math.round(100*(e.volume_level??0)),o=this._activeRoom,n=this._maxVol(),l=this._volStep(n),c=o in this._dragVol?this._dragVol[o]:a,d=i.media_position_updated_at?new Date(i.media_position_updated_at).getTime():0,h="playing"===t.state&&d?Math.max(0,(this._now-d)/1e3):0,p=(i.media_position??0)+h,u=s>0?Math.min(s,p):p,v=i.media_content_id??e.media_content_id,g=this._stationArt(v),m=g?.image?`url("${g.image}")`:i.entity_picture?`url("${i.entity_picture}")`:"linear-gradient(135deg, var(--wp-accent) 0%, var(--wp-card-2) 60%, var(--wp-bg) 100%)",_="playing"===t.state,f=this._loadingName??i.media_title??g?.name??(_?i.app_name??e.app_name??"Playing":"Nothing playing"),b=this._loadingName?"Loading…":`${i.media_artist??""}${i.media_album_name?` · ${i.media_album_name}`:""}`,w=e.source??this._sourceFromContentId(v);return I`
       <div class="pv">
@@ -693,7 +781,7 @@ function t(t,e,i,s){var r,a=arguments.length,o=a<3?e:null===s?s=Object.getOwnPro
     `}_renderFavorites(){if("music_assistant"===this._config.favorites_source)return this._renderMaFavorites();const t=(this._config.favorites??[]).filter(t=>("Playlists"!==this._favTab||"playlist"===t.type)&&(("Stations"!==this._favTab||"station"===t.type)&&(("Albums"!==this._favTab||"album"===t.type)&&!(this._favQ&&!t.name.toLowerCase().includes(this._favQ.toLowerCase()))))),e=this._groupMembers().length;return I`
       <div class="pv pv-scroll">
         <div class="fav-target">
-          Play to <b>${this._label(this._activeRoom)}${e>1?" +"+(e-1):""}</b>
+          Play to <b>${this._label(this._activeRoom)}${t>1?" +"+(t-1):""}</b>
         </div>
         <div class="tabs">
           ${["All","Playlists","Stations","Albums"].map(t=>I`
@@ -758,10 +846,19 @@ function t(t,e,i,s){var r,a=arguments.length,o=a<3?e:null===s?s=Object.getOwnPro
       </div>
     `}_playFavorite(t){t.script?((t,e,i={})=>{const s=e.startsWith("script.")?e.slice(7):e;t.callService("script",s,i)})(this.hass,t.script,{entity_id:this._activeRoom,group_members:this._groupMembers()}):t.media_content_id&&t.media_content_type&&Tt(this.hass,this._activeRoom,t.media_content_id,t.media_content_type),this._prevTitle=this._state(this._activeRoom)?.attributes.media_title,this._loadingName=t.name,this._loadingTimer&&clearTimeout(this._loadingTimer),this._loadingTimer=setTimeout(()=>{this._loadingName=null},8e3),this._view="player"}_renderGrouping(t){const e=this._config.entities;return I`
       <div class="pv pv-scroll">
+        ${r.length?B`
+          <div class="tabs" role="group" aria-label="Saved groups">
+            ${r.map(t=>{const i=t.entities.filter(t=>e.includes(t)),s=i.length>0&&[...i].sort().join(",")===o;return B`
+                <button class=${bt({tab:!0,active:s})}
+                        aria-pressed=${s}
+                        @click=${()=>this._pickGroup(i)}>${t.label}</button>
+              `})}
+          </div>
+        `:Z}
         <div class="grp-banner">
           <div style="min-width:0">
             <div class="lbl">Currently grouped</div>
-            <div class="rooms">${t.map(t=>this._label(t)).join(" + ")||"—"}</div>
+            <div class="rooms">${s.map(t=>this._label(t)).join(" + ")||"—"}</div>
           </div>
           <div class="hint">Tap to toggle</div>
         </div>
@@ -832,12 +929,127 @@ function t(t,e,i,s){var r,a=arguments.length,o=a<3?e:null===s?s=Object.getOwnPro
           `)}
         </select>
       </div>
-      <div class="row">
-        <label>Layout</label>
-        <select @change=${t=>this._val("layout",t.target.value)}>
-          <option value="wall" ?selected=${"wall"===(this._config.layout??"wall")}>wall</option>
-          <option value="mobile" ?selected=${"mobile"===this._config.layout}>mobile</option>
-        </select>
+    `},this._renderOptions=()=>B`
+    <div class="row">
+      <label>Default view</label>
+      <select @change=${t=>this._val("default_view",t.target.value)}>
+        ${["player","favorites","grouping"].map(t=>B`
+          <option value=${t} ?selected=${this._config.default_view===t}>${t}</option>
+        `)}
+      </select>
+    </div>
+    <div class="row">
+      <label>Layout</label>
+      <select @change=${t=>this._val("layout",t.target.value)}>
+        <option value="wall" ?selected=${"wall"===(this._config.layout??"wall")}>wall</option>
+        <option value="mobile" ?selected=${"mobile"===this._config.layout}>mobile</option>
+      </select>
+    </div>
+    <div class="row">
+      <label>Track text scale (0.9–1.6)</label>
+      <input type="number" min="0.9" max="1.6" step="0.05"
+        .value=${String(this._config.track_scale??1.15)}
+        @change=${t=>this._val("track_scale",parseFloat(t.target.value))}/>
+    </div>
+    <div class="row">
+      <label>Volume bar scale (1.0–2.5)</label>
+      <input type="number" min="1" max="2.5" step="0.1"
+        .value=${String(this._config.vol_bar_scale??1.4)}
+        @change=${t=>this._val("vol_bar_scale",parseFloat(t.target.value))}/>
+    </div>
+    <div class="row">
+      <label>Max volume cap (1–100)</label>
+      <input type="number" min="1" max="100" step="1"
+        .value=${String(this._config.max_volume??100)}
+        @change=${t=>this._val("max_volume",parseInt(t.target.value,10))}/>
+      <div class="help">Set below 100 to give the slider finer resolution at low volumes.</div>
+    </div>
+  `,this._renderFavorites=()=>{const t=this._config.favorites??[],e=this._scriptOptions();return B`
+      ${t.map((i,s)=>{const r=`fav:${s}`,o=!!this._openItem[r],a=i.script?"script":"media";return B`
+          <div class="item">
+            <div class="item-head" @click=${()=>this._toggleItem(r)}>
+              <span>${o?"▾":"▸"}</span>
+              <span class="name">${i.name||i.id||"(untitled)"}</span>
+              <span class="count">${i.type??""}</span>
+              <div class="actions" @click=${t=>t.stopPropagation()}>
+                <button class="btn btn-mini" ?disabled=${0===s}
+                  @click=${()=>this._setList("favorites",this._moveItem(t,s,-1))}>↑</button>
+                <button class="btn btn-mini" ?disabled=${s===t.length-1}
+                  @click=${()=>this._setList("favorites",this._moveItem(t,s,1))}>↓</button>
+                <button class="btn btn-mini danger"
+                  @click=${()=>this._setList("favorites",t.filter((t,e)=>e!==s))}>Remove</button>
+              </div>
+            </div>
+            ${o?B`
+              <div class="item-body">
+                <div class="row-inline">
+                  <div>
+                    <label>ID</label>
+                    <input type="text" .value=${i.id??""}
+                      @change=${t=>this._updateFav(s,{id:t.target.value.trim()})}/>
+                  </div>
+                  <div>
+                    <label>Name</label>
+                    <input type="text" .value=${i.name??""}
+                      @change=${t=>this._updateFav(s,{name:t.target.value})}/>
+                  </div>
+                </div>
+                <div class="row">
+                  <label>Type</label>
+                  <div class="chip-list">
+                    ${["playlist","station","album"].map(t=>B`
+                      <span class="chip ${i.type===t?"on":""}"
+                        @click=${()=>this._updateFav(s,{type:t})}>${t}</span>
+                    `)}
+                  </div>
+                </div>
+                <div class="row">
+                  <label>Source</label>
+                  <div class="chip-list">
+                    <span class="chip ${"media"===a?"on":""}"
+                      @click=${()=>this._updateFav(s,{script:void 0})}>media_content_id</span>
+                    <span class="chip ${"script"===a?"on":""}"
+                      @click=${()=>this._updateFav(s,{media_content_id:void 0,media_content_type:void 0})}>script</span>
+                  </div>
+                </div>
+                ${"media"===a?B`
+                  <div class="row">
+                    <label>media_content_id</label>
+                    <textarea rows="2"
+                      @change=${t=>this._updateFav(s,{media_content_id:t.target.value.trim()||void 0})}
+                      >${i.media_content_id??""}</textarea>
+                    <div class="help">Get one via Developer Tools → Services → <code>media_player.play_media</code> → Choose media. Sonos favorite URIs and Sonos Radio stream URIs both work.</div>
+                  </div>
+                  <div class="row">
+                    <label>media_content_type</label>
+                    <input type="text" .value=${i.media_content_type??""}
+                      placeholder="music"
+                      @change=${t=>this._updateFav(s,{media_content_type:t.target.value.trim()||void 0})}/>
+                  </div>
+                `:B`
+                  <div class="row">
+                    <label>Script</label>
+                    <select
+                      @change=${t=>this._updateFav(s,{script:t.target.value||void 0})}>
+                      <option value="">— pick a script.* —</option>
+                      ${e.map(t=>B`<option value=${t} ?selected=${i.script===t}>${t}</option>`)}
+                    </select>
+                    <div class="help">The script receives <code>entity_id</code> (active room) and <code>group_members</code> as service fields.</div>
+                  </div>
+                `}
+                <div class="row">
+                  <label>Art (URL or CSS gradient, optional)</label>
+                  <textarea rows="2"
+                    placeholder="linear-gradient(135deg, #1a1a1a 0%, #6a4a2c 100%)"
+                    @change=${t=>this._updateFav(s,{art:t.target.value.trim()||void 0})}
+                    >${i.art??""}</textarea>
+                </div>
+              </div>
+            `:Z}
+          </div>
+        `})}
+      <div class="adder">
+        <button class="btn primary" @click=${()=>{const e={id:`favorite_${t.length+1}`,name:"New favorite",type:"playlist"};this._setList("favorites",[...t,e]),this._openItem={...this._openItem,[`fav:${t.length}`]:!0}}}>+ Add favorite</button>
       </div>
       <div class="row">
         <label>Favorites source</label>
@@ -858,14 +1070,61 @@ function t(t,e,i,s){var r,a=arguments.length,o=a<3?e:null===s?s=Object.getOwnPro
           .value=${String(this._config.track_scale??1.15)}
           @change=${t=>this._val("track_scale",parseFloat(t.target.value))}/>
       </div>
-      <div class="row">
-        <label>Volume bar scale (1.0–2.5)</label>
-        <input type="number" min="1" max="2.5" step="0.1"
-          .value=${String(this._config.vol_bar_scale??1.4)}
-          @change=${t=>this._val("vol_bar_scale",parseFloat(t.target.value))}/>
+    `},this._renderStationArt=()=>{const t=this._config.station_art??[];return B`
+      ${t.map((e,i)=>{const s=`art:${i}`,r=!!this._openItem[s];return B`
+          <div class="item">
+            <div class="item-head" @click=${()=>this._toggleItem(s)}>
+              <span>${r?"▾":"▸"}</span>
+              <span class="name">${e.name||e.match||"(unmatched)"}</span>
+              <div class="actions" @click=${t=>t.stopPropagation()}>
+                <button class="btn btn-mini" ?disabled=${0===i}
+                  @click=${()=>this._setList("station_art",this._moveItem(t,i,-1))}>↑</button>
+                <button class="btn btn-mini" ?disabled=${i===t.length-1}
+                  @click=${()=>this._setList("station_art",this._moveItem(t,i,1))}>↓</button>
+                <button class="btn btn-mini danger"
+                  @click=${()=>this._setList("station_art",t.filter((t,e)=>e!==i))}>Remove</button>
+              </div>
+            </div>
+            ${r?B`
+              <div class="item-body">
+                <div class="row">
+                  <label>Match (case-insensitive substring of media_content_id)</label>
+                  <input type="text" .value=${e.match??""}
+                    placeholder="stationId=s297990"
+                    @change=${t=>this._updateStationArt(i,{match:t.target.value})}/>
+                  <div class="help">Find one via Developer Tools → States while the station is playing and copy a stable substring out of <code>media_content_id</code>.</div>
+                </div>
+                <div class="row">
+                  <label>Label (shown as title when media_title is missing)</label>
+                  <input type="text" .value=${e.name??""}
+                    @change=${t=>this._updateStationArt(i,{name:t.target.value||void 0})}/>
+                </div>
+                <div class="row">
+                  <label>Image URL</label>
+                  <input type="text" .value=${e.image??""}
+                    placeholder="https://example.com/logo.png"
+                    @change=${t=>this._updateStationArt(i,{image:t.target.value.trim()||void 0})}/>
+                </div>
+              </div>
+            `:Z}
+          </div>
+        `})}
+      <div class="adder">
+        <button class="btn primary" @click=${()=>{this._setList("station_art",[...t,{match:""}]),this._openItem={...this._openItem,[`art:${t.length}`]:!0}}}>+ Add mapping</button>
       </div>
-      <div class="row">
-        <div class="help">Configure <code>favorites:</code> and <code>groups:</code> in YAML for now — visual editing for those is on the roadmap.</div>
+    `}}setConfig(t){this._config=t}_emit(t){this._config=t,this.dispatchEvent(new CustomEvent("config-changed",{detail:{config:t}}))}_val(t,e){this._emit({...this._config,[t]:e})}_setList(t,e){const i={...this._config};Array.isArray(e)&&0===e.length?delete i[t]:i[t]=e,this._emit(i)}_entityOptions(){return this.hass?Object.keys(this.hass.states).filter(t=>t.startsWith("media_player.")).sort():[]}_scriptOptions(){return this.hass?Object.keys(this.hass.states).filter(t=>t.startsWith("script.")).sort():[]}_toggleSection(t){this._open=this._open===t?null:t}_toggleItem(t){this._openItem={...this._openItem,[t]:!this._openItem[t]}}_moveItem(t,e,i){const s=e+i;if(s<0||s>=t.length)return t;const r=t.slice();return[r[e],r[s]]=[r[s],r[e]],r}render(){return this._config?B`
+      ${this._renderSection("rooms","Rooms",(this._config.entities?.length??0)+" configured",this._renderRooms)}
+      ${this._renderSection("options","Options","",this._renderOptions)}
+      ${this._renderSection("favorites","Favorites",(this._config.favorites?.length??0)+" items",this._renderFavorites)}
+      ${this._renderSection("groups","Groups",(this._config.groups?.length??0)+" items",this._renderGroups)}
+      ${this._renderSection("station_art","Station art",(this._config.station_art?.length??0)+" mappings",this._renderStationArt)}
+    `:B``}_renderSection(t,e,i,s){const r=this._open===t;return B`
+      <div class="sec">
+        <div class="sec-head" @click=${()=>this._toggleSection(t)}>
+          <span>${r?"▾":"▸"} ${e}</span>
+          <span class="count">${i}</span>
+        </div>
+        ${r?B`<div class="sec-body">${s.call(this)}</div>`:Z}
       </div>
     `}};te.styles=o`
     .row { display: flex; flex-direction: column; gap: 6px; padding: 8px 0; }

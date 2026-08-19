@@ -13,11 +13,12 @@ import type { HomeAssistant, LovelaceCard } from "custom-card-helpers";
 import { CARD_TAG, EDITOR_TAG, CARD_VERSION } from "./const";
 import { cardStyles } from "./styles";
 import * as Svc from "./services";
+import { cssUrl } from "./util";
 import {
   iconStar, iconSpeaker, iconChev, iconVol, iconVolUp, iconVolDown,
   iconPrev, iconNext, iconPlay, iconPause,
   iconStation, iconAlbum, iconPlaylist,
-  iconLink, iconCheck, iconEq,
+  iconLink, iconCheck, iconEq, iconVolMuted,
 } from "./icons";
 import type {
   WallPanelSonosCardConfig,
@@ -95,12 +96,33 @@ export class WallPanelSonosCard extends LitElement implements LovelaceCard {
   // when hass state catches up. Avoids the perceived "lag" on the play
   // button while the media_player.media_play_pause call is in flight.
   @state() private _optimisticPlaying: boolean | null = null;
+  private _optimisticPlayingTimer?: ReturnType<typeof setTimeout>;
+  // Optimistic mute state for the active room — same pattern as
+  // _optimisticPlaying: flip on tap, clear when hass catches up or the
+  // safety timer fires. Reset on room switch since it's room-scoped.
+  @state() private _optimisticMuted: boolean | null = null;
+  private _optimisticMutedTimer?: ReturnType<typeof setTimeout>;
+  // Optimistic group membership (entity_id → desired grouped state).
+  // The Speakers view reflects a tap instantly instead of waiting the
+  // ~1-2s Sonos takes to re-form the group and push new group_members.
+  @state() private _pendingGroup: Record<string, boolean> = {};
+  private _pendingGroupTimers: Record<string, ReturnType<typeof setTimeout>> = {};
   // When the user picks a favorite, show its name in the player view as
   // "Loading…" until hass reports a track change. Without this the
   // player view appears frozen on the previous track for a beat.
   @state() private _loadingName: string | null = null;
   private _loadingTimer?: ReturnType<typeof setTimeout>;
   private _prevTitle: string | undefined;
+  // Same idea for the next/prev transport buttons — flip a flag the moment
+  // the user taps so the sub-line shows "Loading…" instead of staying on
+  // the stale artist/album until Sonos pushes the new track.
+  @state() private _skipping: boolean = false;
+  private _skipTimer?: ReturnType<typeof setTimeout>;
+  // Transient error message shown across the top of the card when a
+  // service call fails (bad content_id, offline speaker, unknown script,
+  // etc.). Auto-clears after 5s or on user dismiss.
+  @state() private _toast: { message: string; kind: "error" } | null = null;
+  private _toastTimer?: ReturnType<typeof setTimeout>;
   // Wall-clock used to interpolate media_position between hass updates.
   // Bumped every 500ms while a track is playing.
   @state() private _now = Date.now();
@@ -147,9 +169,15 @@ export class WallPanelSonosCard extends LitElement implements LovelaceCard {
   connectedCallback() {
     super.connectedCallback();
     this._tickHandle = setInterval(() => {
-      // Only re-render the progress bar when there's something to advance.
+      // Only re-render the progress bar when there's something to advance
+      // *and* the tab is actually visible. Wall-mounted tablets often sit
+      // on a different dashboard tab for hours — rendering twice per
+      // second behind the scenes wastes CPU and battery.
+      if (document.visibilityState !== "visible") return;
+      if (this._view !== "player") return;
       const s = this._state(this._activeRoom);
-      if (s?.state === "playing" && this._view === "player") this._now = Date.now();
+      if (s?.state !== "playing") return;
+      this._now = Date.now();
     }, 500);
   }
 
@@ -157,25 +185,125 @@ export class WallPanelSonosCard extends LitElement implements LovelaceCard {
     super.disconnectedCallback();
     if (this._tickHandle) clearInterval(this._tickHandle);
     if (this._loadingTimer) clearTimeout(this._loadingTimer);
+    if (this._skipTimer) clearTimeout(this._skipTimer);
+    if (this._optimisticPlayingTimer) clearTimeout(this._optimisticPlayingTimer);
+    if (this._toastTimer) clearTimeout(this._toastTimer);
+    if (this._optimisticMutedTimer) clearTimeout(this._optimisticMutedTimer);
+    for (const t of Object.values(this._pendingGroupTimers)) clearTimeout(t);
+    this._pendingGroupTimers = {};
     for (const t of Object.values(this._dragTimers)) clearTimeout(t);
     this._dragTimers = {};
   }
 
+  // Run an action on pointerdown instead of waiting for the full
+  // press-release cycle — on a touch panel that's typically 80-150ms of
+  // perceived latency saved per tap. The subsequent synthetic click is
+  // suppressed via a short-lived flag on the element; keyboard
+  // activation (Enter/Space) produces a click with no preceding
+  // pointerdown, so it still works. Only use this for fixed controls —
+  // buttons inside scrollable lists must stay on click, otherwise
+  // starting a scroll would trigger them.
+  private _instant(fn: () => void) {
+    return (e: Event) => {
+      const el = e.currentTarget as HTMLElement & { _wpPressed?: boolean };
+      if (e.type === "pointerdown") {
+        const pe = e as PointerEvent;
+        if (pe.pointerType === "mouse" && pe.button !== 0) return;
+        el._wpPressed = true;
+        setTimeout(() => { el._wpPressed = false; }, 400);
+        fn();
+      } else if (el._wpPressed) {
+        el._wpPressed = false;
+      } else {
+        fn();
+      }
+    };
+  }
+
+  // Small wrapper around Svc.* promises so a failing service call
+  // surfaces to the user as a banner instead of being swallowed by the
+  // console. Context describes what the user was trying to do so the
+  // message reads naturally ("Couldn't play Foo — …").
+  private _svc<T>(promise: Promise<T>, context: string): Promise<T | void> {
+    return promise.catch((err: unknown) => {
+      const detail = err instanceof Error ? err.message : String(err);
+      this._showToast(`${context} — ${detail}`);
+    });
+  }
+  private _showToast(message: string) {
+    this._toast = { message, kind: "error" };
+    if (this._toastTimer) clearTimeout(this._toastTimer);
+    this._toastTimer = setTimeout(() => { this._toast = null; }, 5000);
+  }
+
+  // Lit re-renders whenever any tracked property changes. `hass` updates
+  // every time *any* HA entity changes — dozens of times per second on a
+  // busy install. Skip the render when none of the entities we actually
+  // care about (the configured Sonos players) have a new state object.
+  shouldUpdate(changed: PropertyValues): boolean {
+    if (changed.size > 1 || !changed.has("hass")) return true;
+    if (!this._config) return true;
+    const prev = changed.get("hass") as HomeAssistant | undefined;
+    if (!prev) return true;
+    for (const id of this._config.entities) {
+      // HA hands out a new state object whenever an entity changes, so
+      // reference inequality is enough — no deep compare needed.
+      if (prev.states[id] !== this.hass.states[id]) return true;
+    }
+    return false;
+  }
+
   willUpdate(changed: PropertyValues) {
     if (!changed.has("hass") || !this._config) return;
-    // One-shot: when hass first arrives, switch the active room to
-    // whatever's currently playing (largest group wins, then earliest
-    // in entities). After this, we never auto-switch again — manual
-    // picks own the selection.
+    // One-shot: when hass first arrives *and* something is actually
+    // playing, switch the active room to that player. Only latch the
+    // flag once we've truly picked — otherwise loading the dashboard
+    // while everything is idle would freeze the default room forever
+    // and later playback wouldn't auto-focus.
     if (!this._userPickedRoom) {
       const best = this._pickActivePlayer();
-      if (best && best !== this._activeRoom) this._activeRoom = best;
-      this._userPickedRoom = true;
+      if (best) {
+        if (best !== this._activeRoom) this._activeRoom = best;
+        this._userPickedRoom = true;
+      }
     }
     // Clear the optimistic play state once hass reflects what we sent.
     if (this._optimisticPlaying !== null) {
       const real = this._state(this._activeRoom)?.state === "playing";
-      if (real === this._optimisticPlaying) this._optimisticPlaying = null;
+      if (real === this._optimisticPlaying) {
+        this._optimisticPlaying = null;
+        if (this._optimisticPlayingTimer) {
+          clearTimeout(this._optimisticPlayingTimer);
+          this._optimisticPlayingTimer = undefined;
+        }
+      }
+    }
+    // Same for optimistic mute.
+    if (this._optimisticMuted !== null) {
+      const real = !!this._state(this._activeRoom)?.attributes.is_volume_muted;
+      if (real === this._optimisticMuted) {
+        this._optimisticMuted = null;
+        if (this._optimisticMutedTimer) {
+          clearTimeout(this._optimisticMutedTimer);
+          this._optimisticMutedTimer = undefined;
+        }
+      }
+    }
+    // Clear pending group toggles that hass now reflects.
+    if (Object.keys(this._pendingGroup).length) {
+      const members = this._state(this._activeRoom)?.attributes.group_members ?? [this._activeRoom];
+      let nextPending: Record<string, boolean> | null = null;
+      for (const [id, desired] of Object.entries(this._pendingGroup)) {
+        if (members.includes(id) === desired) {
+          if (!nextPending) nextPending = { ...this._pendingGroup };
+          delete nextPending[id];
+          if (this._pendingGroupTimers[id]) {
+            clearTimeout(this._pendingGroupTimers[id]);
+            delete this._pendingGroupTimers[id];
+          }
+        }
+      }
+      if (nextPending) this._pendingGroup = nextPending;
     }
     // Clear the favorite "Loading…" overlay as soon as the track title
     // changes (Sonos has actually switched). Falls back to the 8s timer
@@ -187,12 +315,24 @@ export class WallPanelSonosCard extends LitElement implements LovelaceCard {
         if (this._loadingTimer) { clearTimeout(this._loadingTimer); this._loadingTimer = undefined; }
       }
     }
+    // Same for the next/prev skip indicator.
+    if (this._skipping) {
+      const cur = this._state(this._activeRoom)?.attributes.media_title;
+      if (cur && cur !== this._prevTitle) {
+        this._skipping = false;
+        if (this._skipTimer) { clearTimeout(this._skipTimer); this._skipTimer = undefined; }
+      }
+    }
     // Clear post-release volume latches whose hass value has caught up.
     // Active drags don't have a timer entry yet, so they're left alone.
+    // The active room's latch holds the *group average* (that's what
+    // the main slider shows), so compare it against the average too.
     let nextDrag: Record<string, number> | null = null;
     for (const key of Object.keys(this._dragVol)) {
       if (!this._dragTimers[key]) continue;
-      const real = Math.round((this._state(key)?.attributes.volume_level ?? 0) * 100);
+      const real = key === this._activeRoom
+        ? this._groupAvgVol()
+        : Math.round((this._state(key)?.attributes.volume_level ?? 0) * 100);
       if (Math.abs(real - this._dragVol[key]) <= 2) {
         if (!nextDrag) nextDrag = { ...this._dragVol };
         delete nextDrag[key];
@@ -235,15 +375,14 @@ export class WallPanelSonosCard extends LitElement implements LovelaceCard {
     }
     return undefined;
   }
-  // Look up a user-configured station_art entry by substring match
-  // against media_content_id. Used to surface art/labels for streaming
+  // Look up a station_art entry by substring match against
+  // media_content_id. Used to surface art/labels for streaming
   // sources HA doesn't populate metadata for (TuneIn, SiriusXM, etc.).
   private _stationArt(contentId: string | undefined): StationArt | undefined {
-    if (!contentId || !this._config?.station_art?.length) return undefined;
+    const entries = this._config.station_art ?? [];
+    if (!contentId || !entries.length) return undefined;
     const cid = contentId.toLowerCase();
-    return this._config.station_art.find(
-      e => e.match && cid.includes(e.match.toLowerCase()),
-    );
+    return entries.find(e => e.match && cid.includes(e.match.toLowerCase()));
   }
   // Sonos buries the streaming service in the media_content_id query
   // string when no `source` attribute is exposed (TuneIn radio, etc.).
@@ -287,10 +426,13 @@ export class WallPanelSonosCard extends LitElement implements LovelaceCard {
     this._activeRoom = id;
     this._userPickedRoom = true;
     this._menuOpen = false;
+    // Optimistic latches are scoped to the previously-active room.
+    this._optimisticMuted = null;
+    this._optimisticPlaying = null;
     // If the picked room is already grouped with the previously-active
     // room, just switch the view — don't tear the group apart. Otherwise
     // solo it (matches the dropdown's "pick a standalone room" intent).
-    if (!cur.includes(id)) Svc.unjoin(this.hass, id);
+    if (!cur.includes(id)) this._svc(Svc.unjoin(this.hass, id), `Couldn't ungroup ${this._label(id)}`);
   }
   private _pickGroup(entities: string[]) {
     if (entities.length === 0) return;
@@ -298,19 +440,71 @@ export class WallPanelSonosCard extends LitElement implements LovelaceCard {
     this._activeRoom = primary;
     this._userPickedRoom = true;
     this._menuOpen = false;
-    Svc.joinGroup(this.hass, primary, entities.slice(1));
+    this._optimisticMuted = null;
+    this._optimisticPlaying = null;
+    this._svc(Svc.joinGroup(this.hass, primary, entities.slice(1)),
+      `Couldn't create group "${this._label(primary)}"`);
   }
   private _onPlayPause(currentlyPlaying: boolean) {
     // Flip the icon immediately so the press feels responsive — willUpdate
-    // clears this once hass reports the actual new state.
+    // clears this once hass reports the actual new state. Safety timeout
+    // covers the case where the service call fails or Sonos never
+    // reports the transition, so the icon can't get stuck lying.
     this._optimisticPlaying = !currentlyPlaying;
-    Svc.playPause(this.hass, this._activeRoom);
+    if (this._optimisticPlayingTimer) clearTimeout(this._optimisticPlayingTimer);
+    this._optimisticPlayingTimer = setTimeout(() => { this._optimisticPlaying = null; }, 5000);
+    this._svc(Svc.playPause(this.hass, this._activeRoom),
+      `Couldn't ${currentlyPlaying ? "pause" : "resume"} ${this._label(this._activeRoom)}`);
+  }
+  private _onSkip(dir: "next" | "prev") {
+    // Snapshot the current title so willUpdate can detect when Sonos
+    // pushes the new track and clear the indicator. Bound the wait so a
+    // stalled service call doesn't leave "Loading…" stuck forever.
+    this._prevTitle = this._state(this._activeRoom)?.attributes.media_title;
+    this._skipping = true;
+    if (this._skipTimer) clearTimeout(this._skipTimer);
+    this._skipTimer = setTimeout(() => { this._skipping = false; }, 5000);
+    const call = dir === "next"
+      ? Svc.next(this.hass, this._activeRoom)
+      : Svc.prev(this.hass, this._activeRoom);
+    this._svc(call, `Couldn't skip ${dir === "next" ? "forward" : "back"}`);
   }
   private _toggleInGroup(id: string) {
     if (id === this._activeRoom) return;
     const cur = this._groupMembers();
-    if (cur.includes(id)) Svc.unjoin(this.hass, id);
-    else Svc.joinGroup(this.hass, this._activeRoom, [...cur.filter(x => x !== this._activeRoom), id]);
+    const joining = !cur.includes(id);
+    // Reflect the tap instantly — Sonos takes ~1-2s to re-form the group
+    // and push new group_members. willUpdate clears the latch when hass
+    // catches up; the timer is the failure fallback.
+    this._pendingGroup = { ...this._pendingGroup, [id]: joining };
+    if (this._pendingGroupTimers[id]) clearTimeout(this._pendingGroupTimers[id]);
+    this._pendingGroupTimers[id] = setTimeout(() => {
+      delete this._pendingGroupTimers[id];
+      if (id in this._pendingGroup) {
+        const next = { ...this._pendingGroup };
+        delete next[id];
+        this._pendingGroup = next;
+      }
+    }, 6000);
+    if (joining) {
+      this._svc(
+        Svc.joinGroup(this.hass, this._activeRoom, [...cur.filter(x => x !== this._activeRoom), id]),
+        `Couldn't add ${this._label(id)} to the group`,
+      );
+    } else {
+      this._svc(Svc.unjoin(this.hass, id), `Couldn't remove ${this._label(id)} from the group`);
+    }
+  }
+  private _onMuteToggle() {
+    const cur = this._optimisticMuted
+      ?? !!this._state(this._activeRoom)?.attributes.is_volume_muted;
+    this._optimisticMuted = !cur;
+    if (this._optimisticMutedTimer) clearTimeout(this._optimisticMutedTimer);
+    this._optimisticMutedTimer = setTimeout(() => { this._optimisticMuted = null; }, 5000);
+    this._svc(
+      Svc.muteToggle(this.hass, this._activeRoom, cur),
+      `Couldn't ${cur ? "unmute" : "mute"} ${this._label(this._activeRoom)}`,
+    );
   }
   private _slide(e: PointerEvent, max: number, onChange: (v: number) => void, key?: string) {
     const el = e.currentTarget as HTMLElement;
@@ -397,6 +591,13 @@ export class WallPanelSonosCard extends LitElement implements LovelaceCard {
       <ha-card>
         <div class="root">
           ${this._renderHeader(titleText, groupSize)}
+          ${this._toast ? html`
+            <div class="toast ${this._toast.kind}" role="alert">
+              <span class="toast-msg">${this._toast.message}</span>
+              <button class="toast-x" aria-label="Dismiss"
+                @click=${() => { this._toast = null; if (this._toastTimer) clearTimeout(this._toastTimer); }}>×</button>
+            </div>
+          ` : nothing}
           ${this._view === "player" ? this._renderPlayer(s) : nothing}
           ${this._view === "favorites" ? this._renderFavorites() : nothing}
           ${this._view === "grouping" ? this._renderGrouping(groupMembers) : nothing}
@@ -409,10 +610,13 @@ export class WallPanelSonosCard extends LitElement implements LovelaceCard {
   private _renderHeader(titleText: string, groupSize: number) {
     return html`
       <div class="hdr">
-        <button class=${classMap({ "hdr-btn": true, active: this._view === "favorites" })}
-                @click=${() => this._setView("favorites")} aria-label="Favorites">
-          ${iconStar}
-        </button>
+        <div class="hdr-side left">
+          <button class=${classMap({ "hdr-btn": true, active: this._view === "favorites" })}
+                  @click=${() => this._setView("favorites")}
+                  aria-label="Favorites" aria-pressed=${this._view === "favorites"}>
+            ${iconStar}
+          </button>
+        </div>
         <button class=${classMap({ "hdr-title": true, "menu-open": this._menuOpen })}
                 @click=${this._onTitleClick}>
           <span>${titleText}</span>
@@ -421,10 +625,13 @@ export class WallPanelSonosCard extends LitElement implements LovelaceCard {
           ${this._view === "player"
             ? html`<span class=${classMap({ chev: true, up: this._menuOpen })}>${iconChev}</span>` : nothing}
         </button>
-        <button class=${classMap({ "hdr-btn": true, active: this._view === "grouping" })}
-                @click=${() => this._setView("grouping")} aria-label="Speakers">
-          ${iconSpeaker}
-        </button>
+        <div class="hdr-side right">
+          <button class=${classMap({ "hdr-btn": true, active: this._view === "grouping" })}
+                  @click=${() => this._setView("grouping")}
+                  aria-label="Speakers" aria-pressed=${this._view === "grouping"}>
+            ${iconSpeaker}
+          </button>
+        </div>
       </div>
     `;
   }
@@ -440,7 +647,11 @@ export class WallPanelSonosCard extends LitElement implements LovelaceCard {
       : this._coordinatorMeta(a.group_members) ?? a;
     const dur = meta.media_duration ?? 0;
     const playing = this._optimisticPlaying ?? (s.state === "playing");
-    const realVol = Math.round((a.volume_level ?? 0) * 100);
+    const muted = this._optimisticMuted ?? !!a.is_volume_muted;
+    // When the room is grouped, the main slider is a *group* volume:
+    // it shows the members' average and moves everyone by the same
+    // delta (per-room offsets set in the Speakers view are preserved).
+    const realVol = this._groupAvgVol();
     const room = this._activeRoom;
     const maxVol = this._maxVol();
     const step = this._volStep(maxVol);
@@ -460,9 +671,9 @@ export class WallPanelSonosCard extends LitElement implements LovelaceCard {
     const contentId = meta.media_content_id ?? a.media_content_id;
     const station = this._stationArt(contentId);
     const coverImage = station?.image
-      ? `url("${station.image}")`
+      ? cssUrl(station.image)
       : meta.entity_picture
-        ? `url("${meta.entity_picture}")`
+        ? cssUrl(meta.entity_picture)
         : "linear-gradient(135deg, var(--wp-accent) 0%, var(--wp-card-2) 60%, var(--wp-bg) 100%)";
     // Sonos reports state="playing" with no media_title for TV, line-in,
     // and many streaming sources, plus the brief window between tracks.
@@ -473,7 +684,7 @@ export class WallPanelSonosCard extends LitElement implements LovelaceCard {
       ?? meta.media_title
       ?? station?.name
       ?? (isPlaying ? (meta.app_name ?? a.app_name ?? "Playing") : "Nothing playing");
-    const trackSub = this._loadingName
+    const trackSub = (this._loadingName || this._skipping)
       ? "Loading…"
       : `${meta.media_artist ?? ""}${meta.media_album_name ? ` · ${meta.media_album_name}` : ""}`;
     // Surface the streaming service in the source line above the cover
@@ -498,17 +709,45 @@ export class WallPanelSonosCard extends LitElement implements LovelaceCard {
           <span>${fmt(dur)}</span>
         </div>
         <div class="transport">
-          <button class="t-btn" @click=${() => this._stepVol(-step, maxVol)}>${iconVolDown}</button>
-          <button class="t-btn" @click=${() => Svc.prev(this.hass, this._activeRoom)}>${iconPrev}</button>
-          <button class="play-btn" @click=${() => this._onPlayPause(playing)}>
-            ${playing ? iconPause : iconPlay}
-          </button>
-          <button class="t-btn" @click=${() => Svc.next(this.hass, this._activeRoom)}>${iconNext}</button>
-          <button class="t-btn" @click=${() => this._stepVol(step, maxVol)}>${iconVolUp}</button>
+          ${(() => {
+            // Fixed controls fire on pointerdown for instant response.
+            // Each handler is created once per render and shared between
+            // the pointerdown and click bindings — the double-fire guard
+            // lives on the element, so this is safe across re-renders.
+            const volDn = this._instant(() => this._stepVol(-step, maxVol));
+            const prev = this._instant(() => this._onSkip("prev"));
+            const play = this._instant(() => this._onPlayPause(playing));
+            const next = this._instant(() => this._onSkip("next"));
+            const volUp = this._instant(() => this._stepVol(step, maxVol));
+            return html`
+              <button class="t-btn" aria-label="Volume down"
+                @pointerdown=${volDn} @click=${volDn}>${iconVolDown}</button>
+              <button class="t-btn" aria-label="Previous track"
+                @pointerdown=${prev} @click=${prev}>${iconPrev}</button>
+              <button class="play-btn" aria-label=${playing ? "Pause" : "Play"}
+                @pointerdown=${play} @click=${play}>
+                ${playing ? iconPause : iconPlay}
+              </button>
+              <button class="t-btn" aria-label="Next track"
+                @pointerdown=${next} @click=${next}>${iconNext}</button>
+              <button class="t-btn" aria-label="Volume up"
+                @pointerdown=${volUp} @click=${volUp}>${iconVolUp}</button>
+            `;
+          })()}
         </div>
-        <div class="vol-row">
-          <span class="vol-icon">${iconVol}</span>
-          ${this._slider(vol, maxVol, v => Svc.setVolume(this.hass, this._activeRoom, v), this._activeRoom)}
+        <div class=${classMap({ "vol-row": true, muted })}>
+          ${(() => {
+            const mute = this._instant(() => this._onMuteToggle());
+            return html`
+              <button class="vol-icon mute-btn"
+                aria-label=${muted ? "Unmute" : "Mute"} aria-pressed=${muted}
+                @pointerdown=${mute} @click=${mute}>
+                ${muted ? iconVolMuted : iconVol}
+              </button>
+            `;
+          })()}
+          ${this._slider(vol, maxVol, v => this._setGroupVolume(v), this._activeRoom,
+            `Volume for ${this._label(this._activeRoom)}`)}
           <span class="vol-num">${vol}</span>
         </div>
       </div>
@@ -524,15 +763,45 @@ export class WallPanelSonosCard extends LitElement implements LovelaceCard {
     // max_volume — about 5% of the range, never less than 1.
     return Math.max(1, Math.round(max / 20));
   }
+  // Average member volume — what the main slider shows for a group.
+  // Falls back to the active room's own volume when it's solo.
+  private _groupAvgVol(): number {
+    const members = this._groupMembers();
+    if (members.length <= 1) {
+      return Math.round((this._state(this._activeRoom)?.attributes.volume_level ?? 0) * 100);
+    }
+    const sum = members.reduce(
+      (acc, id) => acc + (this._state(id)?.attributes.volume_level ?? 0), 0);
+    return Math.round((sum / members.length) * 100);
+  }
+  // Set the group volume to `target`: every member moves by the same
+  // delta (target − current average), preserving the per-room offsets
+  // set in the Speakers view. Solo rooms behave exactly as before.
+  // During a drag, hass member volumes are effectively a stable
+  // snapshot, so each throttled tick recomputes absolute member values
+  // from that base — deltas can't compound.
+  private _setGroupVolume(target: number) {
+    const members = this._groupMembers();
+    if (members.length <= 1) {
+      this._svc(Svc.setVolume(this.hass, this._activeRoom, target),
+        `Couldn't set volume for ${this._label(this._activeRoom)}`);
+      return;
+    }
+    const delta = target - this._groupAvgVol();
+    if (delta === 0) return;
+    for (const id of members) {
+      const mv = Math.round((this._state(id)?.attributes.volume_level ?? 0) * 100);
+      this._svc(Svc.setVolume(this.hass, id, Math.max(0, Math.min(100, mv + delta))),
+        `Couldn't set volume for ${this._label(id)}`);
+    }
+  }
   private _stepVol(delta: number, max: number) {
     const room = this._activeRoom;
-    const cur = room in this._dragVol
-      ? this._dragVol[room]
-      : Math.round((this._state(room)?.attributes.volume_level ?? 0) * 100);
+    const cur = room in this._dragVol ? this._dragVol[room] : this._groupAvgVol();
     const next = Math.max(0, Math.min(max, cur + delta));
     if (next === cur) return;
     // Optimistic latch so repeated taps feel instant + remain coherent
-    // even before hass round-trips the volume_set call.
+    // even before hass round-trips the volume_set call(s).
     this._dragVol = { ...this._dragVol, [room]: next };
     if (this._dragTimers[room]) clearTimeout(this._dragTimers[room]);
     this._dragTimers[room] = setTimeout(() => {
@@ -543,18 +812,56 @@ export class WallPanelSonosCard extends LitElement implements LovelaceCard {
         this._dragVol = nextDrag;
       }
     }, 2000);
-    Svc.setVolume(this.hass, room, next);
+    this._setGroupVolume(next);
   }
 
-  private _slider(value: number, max: number, onChange: (v: number) => void, key?: string) {
+  private _slider(value: number, max: number, onChange: (v: number) => void, key?: string, label = "Volume") {
     const display = key && key in this._dragVol ? this._dragVol[key] : value;
     const pct = max > 0 ? Math.max(0, Math.min(100, (display / max) * 100)) : 0;
     return html`
-      <div class="slider" @pointerdown=${(e: PointerEvent) => this._slide(e, max, onChange, key)}>
+      <div class="slider" role="slider" tabindex="0"
+        aria-label=${label}
+        aria-valuemin="0" aria-valuemax=${max} aria-valuenow=${display}
+        @pointerdown=${(e: PointerEvent) => this._slide(e, max, onChange, key)}
+        @keydown=${(e: KeyboardEvent) => this._sliderKeydown(e, display, max, onChange, key)}>
         <div class="fill" style=${styleMap({ width: `${pct}%` })}></div>
         <div class="knob" style=${styleMap({ left: `${pct}%` })}></div>
       </div>
     `;
+  }
+  private _sliderKeydown(
+    e: KeyboardEvent,
+    current: number,
+    max: number,
+    onChange: (v: number) => void,
+    key?: string,
+  ) {
+    const step = this._volStep(max);
+    let next: number | null = null;
+    switch (e.key) {
+      case "ArrowRight": case "ArrowUp": next = Math.min(max, current + step); break;
+      case "ArrowLeft": case "ArrowDown": next = Math.max(0, current - step); break;
+      case "Home": next = 0; break;
+      case "End": next = max; break;
+      default: return;
+    }
+    e.preventDefault();
+    if (next === current) return;
+    // Latch the optimistic value the same way pointer drags do, so the
+    // knob doesn't snap back while volume_set round-trips.
+    if (key) {
+      this._dragVol = { ...this._dragVol, [key]: next };
+      if (this._dragTimers[key]) clearTimeout(this._dragTimers[key]);
+      this._dragTimers[key] = setTimeout(() => {
+        delete this._dragTimers[key];
+        if (key in this._dragVol) {
+          const nextDrag = { ...this._dragVol };
+          delete nextDrag[key];
+          this._dragVol = nextDrag;
+        }
+      }, 2000);
+    }
+    onChange(next);
   }
 
   private _renderFavorites() {
@@ -563,29 +870,32 @@ export class WallPanelSonosCard extends LitElement implements LovelaceCard {
     }
     const cfg = this._config.favorites ?? [];
     const tabs: Array<typeof this._favTab> = ["All", "Playlists", "Stations", "Albums"];
-    const filtered = cfg.filter(f => {
-      if (this._favTab === "Playlists" && f.type !== "playlist") return false;
-      if (this._favTab === "Stations" && f.type !== "station") return false;
-      if (this._favTab === "Albums" && f.type !== "album") return false;
+    const groupSize = this._groupMembers().length;
+    const tabType = this._favTab === "Playlists" ? "playlist"
+      : this._favTab === "Stations" ? "station"
+      : this._favTab === "Albums" ? "album"
+      : null;
+    const filtered = (this._config.favorites ?? []).filter(f => {
+      if (tabType && f.type !== tabType) return false;
       if (this._favQ && !f.name.toLowerCase().includes(this._favQ.toLowerCase())) return false;
       return true;
     });
-    const groupSize = this._groupMembers().length;
 
     return html`
       <div class="pv pv-scroll">
         <div class="fav-target">
           Play to <b>${this._label(this._activeRoom)}${groupSize > 1 ? ` +${groupSize - 1}` : ""}</b>
         </div>
-        <div class="tabs">
+        <div class="tabs" role="tablist" aria-label="Favorite categories">
           ${tabs.map(tb => html`
             <button class=${classMap({ tab: true, active: this._favTab === tb })}
+                    role="tab" aria-selected=${this._favTab === tb}
                     @click=${() => this._favTab = tb}>${tb}</button>
           `)}
         </div>
         <div class="fav-list">
           ${filtered.length === 0
-            ? html`<div style="text-align:center;color:var(--wp-text-dim);padding:40px;font-size:15px">No favorites configured</div>`
+            ? html`<div class="fav-empty">No favorites configured</div>`
             : filtered.map(f => html`
               <button class="fav-item" @click=${() => this._playFavorite(f)}>
                 <span class="fav-art" style=${styleMap({ background: f.art ?? "linear-gradient(135deg,#4a5d72,#2a3540)" })}>
@@ -834,15 +1144,20 @@ export class WallPanelSonosCard extends LitElement implements LovelaceCard {
   }
 
   private _playFavorite(f: FavoriteConfig) {
-    if (f.script) Svc.fireScript(this.hass, f.script, {
-      // Pass the active room (and its current group) so the script can
-      // target whichever speaker the user is looking at, instead of
-      // hard-coding an entity per script.
-      entity_id: this._activeRoom,
-      group_members: this._groupMembers(),
-    });
-    else if (f.media_content_id && f.media_content_type)
-      Svc.playMedia(this.hass, this._activeRoom, f.media_content_id, f.media_content_type);
+    if (f.script) {
+      this._svc(Svc.fireScript(this.hass, f.script, {
+        // Pass the active room (and its current group) so the script can
+        // target whichever speaker the user is looking at, instead of
+        // hard-coding an entity per script.
+        entity_id: this._activeRoom,
+        group_members: this._groupMembers(),
+      }), `Couldn't run ${f.script} for "${f.name}"`);
+    } else if (f.media_content_id && f.media_content_type) {
+      this._svc(
+        Svc.playMedia(this.hass, this._activeRoom, f.media_content_id, f.media_content_type),
+        `Couldn't play "${f.name}"`,
+      );
+    }
     // Capture the title that's playing right now so willUpdate can detect
     // when Sonos has actually switched to the new track and clear the
     // "Loading…" overlay. Safety-net timer also clears it after 8s.
@@ -853,15 +1168,37 @@ export class WallPanelSonosCard extends LitElement implements LovelaceCard {
     this._view = "player";
   }
 
+
   private _renderGrouping(groupMembers: string[]) {
     const allEntities = this._config.entities;
-    const inGroup = (id: string) => groupMembers.includes(id);
+    // Overlay pending toggles on the hass-reported membership so a tap
+    // reflects instantly — Sonos takes ~1-2s to push new group_members.
+    const inGroup = (id: string) => this._pendingGroup[id] ?? groupMembers.includes(id);
+    const effectiveMembers = allEntities.filter(id => id === this._activeRoom || inGroup(id));
+    const savedGroups = this._config.groups ?? [];
+    const currentSig = [...effectiveMembers].sort().join(",");
     return html`
       <div class="pv pv-scroll">
+        ${savedGroups.length ? html`
+          <div class="tabs" role="group" aria-label="Saved groups">
+            ${savedGroups.map(g => {
+              // Only consider rooms this card actually knows about, so a
+              // group referencing an unconfigured entity still works.
+              const rooms = g.entities.filter(e => allEntities.includes(e));
+              const active = rooms.length > 0
+                && [...rooms].sort().join(",") === currentSig;
+              return html`
+                <button class=${classMap({ tab: true, active })}
+                        aria-pressed=${active}
+                        @click=${() => this._pickGroup(rooms)}>${g.label}</button>
+              `;
+            })}
+          </div>
+        ` : nothing}
         <div class="grp-banner">
           <div style="min-width:0">
             <div class="lbl">Currently grouped</div>
-            <div class="rooms">${groupMembers.map(id => this._label(id)).join(" + ") || "—"}</div>
+            <div class="rooms">${effectiveMembers.map(id => this._label(id)).join(" + ") || "—"}</div>
           </div>
           <div class="hint">Tap to toggle</div>
         </div>
@@ -869,29 +1206,32 @@ export class WallPanelSonosCard extends LitElement implements LovelaceCard {
           ${allEntities.map(id => {
             const active = id === this._activeRoom;
             const grouped = inGroup(id);
+            const pending = id in this._pendingGroup;
             return html`
-              <button class=${classMap({ "grp-row": true, primary: active, grouped: grouped && !active })}
+              <button class=${classMap({ "grp-row": true, primary: active, grouped: grouped && !active, pending })}
+                      aria-pressed=${grouped}
+                      aria-label="${this._label(id)}${active ? ", primary speaker" : grouped ? ", in group" : ", not in group"}"
                       @click=${() => this._toggleInGroup(id)}>
                 <span style="display:flex;align-items:center;gap:8px;flex:1;min-width:0">
                   ${active ? html`<span style="display:flex">${iconEq}</span>` : nothing}
                   <span style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${this._label(id)}</span>
                 </span>
                 ${active ? html`<span class="badge">PRIMARY</span>`
-                  : grouped ? html`<span style="width:20px;height:20px;border-radius:50%;background:rgba(255,255,255,0.6);display:flex;align-items:center;justify-content:center;color:var(--wp-bg)">${iconCheck}</span>`
+                  : grouped ? html`<span style="width:20px;height:20px;border-radius:50%;background:var(--wp-on-accent-soft);display:flex;align-items:center;justify-content:center;color:var(--wp-bg)">${iconCheck}</span>`
                   : nothing}
               </button>
             `;
           })}
         </div>
-        ${groupMembers.length > 1 ? html`
+        ${effectiveMembers.length > 1 ? html`
           <div class="grp-volumes">
             <div class="grp-volumes-title">Group Volumes</div>
-            ${groupMembers.map(id => {
+            ${effectiveMembers.map(id => {
               const v = Math.round((this._state(id)?.attributes.volume_level ?? 0) * 100);
               return html`
                 <div class="grp-vol-row">
                   <span class="name">${this._label(id)}${id === this._activeRoom ? html`<span style="color:var(--wp-accent)"> ·</span>` : nothing}</span>
-                  ${this._slider(v, 100, vv => Svc.setVolume(this.hass, id, vv), id)}
+                  ${this._slider(v, 100, vv => Svc.setVolume(this.hass, id, vv), id, `Volume for ${this._label(id)}`)}
                   <span class="val">${v}</span>
                 </div>
               `;
@@ -906,8 +1246,10 @@ export class WallPanelSonosCard extends LitElement implements LovelaceCard {
     const savedGroups = this._config.groups ?? [];
     const currentSig = [...groupMembers].sort().join(",");
     return html`
-      <div class="menu-overlay" @click=${() => this._menuOpen = false}>
-        <div class="menu-card" @click=${(e: Event) => e.stopPropagation()}>
+      <div class="menu-overlay" @click=${() => this._menuOpen = false}
+           @keydown=${(e: KeyboardEvent) => { if (e.key === "Escape") this._menuOpen = false; }}>
+        <div class="menu-card" role="dialog" aria-label="Rooms and groups"
+             @click=${(e: Event) => e.stopPropagation()}>
           ${groupMembers.length > 1 || savedGroups.length > 0 ? html`<div class="menu-section">Groups</div>` : nothing}
           ${groupMembers.length > 1 ? html`
             <button class="menu-item active">
@@ -955,5 +1297,10 @@ export class WallPanelSonosCard extends LitElement implements LovelaceCard {
   preview: false,
   documentationURL: "https://github.com/your-org/wall-panel-sonos-card",
 });
+
+// Side-effect import: registers the mini card in the same bundle so a
+// single resource entry in Lovelace gives users both
+// `custom:wall-panel-sonos-card` and `custom:wall-panel-sonos-mini-card`.
+import "./mini-card";
 
 export { CARD_VERSION };

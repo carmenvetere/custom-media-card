@@ -23,12 +23,21 @@ export const cardStyles = css`
        back via the second declaration for the rare browser without it. */
     --wp-accent-soft: rgba(142, 177, 191, 0.45);
     --wp-accent-soft: color-mix(in srgb, var(--wp-accent) 45%, transparent);
-    /* Shadows */
-    --wp-shadow-card: 0 8px 32px rgba(0, 0, 0, 0.18);
-    --wp-shadow-cover: 0 8px 32px rgba(0, 0, 0, 0.35);
+    /* Shadows. Card + cover fall back to the HA theme's --ha-card-box-shadow
+       so a theme with a distinctive elevation shows through; the pixel
+       defaults keep the current look when no theme sets it. */
+    --wp-shadow-card: var(--ha-card-box-shadow, 0 8px 32px rgba(0, 0, 0, 0.18));
+    --wp-shadow-cover: var(--ha-card-box-shadow, 0 8px 32px rgba(0, 0, 0, 0.35));
     --wp-shadow-play: 0 4px 16px rgba(0, 0, 0, 0.25);
     --wp-shadow-menu: 0 16px 40px rgba(0, 0, 0, 0.5);
-    --wp-radius: 28px;
+    /* Radii. Outer card follows the HA theme's --ha-card-border-radius;
+       interior tiles derive from two smaller stops. Themes wanting a
+       consistent rounded-rectangle language can override any of these
+       independently. Pill (999px) and round (50%) shapes stay hard-coded
+       — those are structural, not decorative. */
+    --wp-radius: var(--ha-card-border-radius, 28px);
+    --wp-radius-tile: 18px;
+    --wp-radius-tile-sm: 12px;
     --wp-radius-pill: 999px;
     --wp-track-scale: 1.15;
     --wp-vol-scale: 1.4;
@@ -66,15 +75,25 @@ export const cardStyles = css`
     min-height: 600px;
   }
 
-  /* HEADER */
+  /* HEADER
+     Grid with 1fr/auto/1fr guarantees the title stays dead-centered
+     regardless of how many buttons sit on either side. With plain flex
+     + space-between the title floated toward whichever side had fewer
+     buttons — visible whenever the sides hold different button counts. */
   .hdr {
-    display: flex;
+    display: grid;
+    grid-template-columns: 1fr auto 1fr;
     align-items: center;
-    justify-content: space-between;
     gap: 10px;
     padding: 14px 18px 12px;
     flex-shrink: 0;
   }
+  .hdr-side {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .hdr-side.right { justify-content: flex-end; }
   .hdr-btn {
     width: 44px;
     height: 44px;
@@ -103,7 +122,7 @@ export const cardStyles = css`
     font-size: 23px;
     font-weight: 600;
     padding: 6px 12px;
-    border-radius: 14px;
+    border-radius: var(--wp-radius-tile-sm);
     transition: background 0.15s;
   }
   .hdr-title.menu-open {
@@ -121,6 +140,38 @@ export const cardStyles = css`
   }
   .chev.up {
     transform: rotate(180deg);
+  }
+
+  /* TOAST — service-call failure banner. Auto-clears after 5s.
+     Kept inline in the .root flex flow so it pushes the view down
+     rather than covering the header. */
+  .toast {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin: 0 22px 8px;
+    padding: 10px 14px;
+    background: var(--error-color, #cf6679);
+    color: var(--wp-bg);
+    border-radius: var(--wp-radius-tile-sm);
+    font-size: 13px;
+    animation: toast-in 0.15s ease-out;
+  }
+  .toast-msg { flex: 1; min-width: 0; }
+  .toast-x {
+    background: none;
+    border: 0;
+    color: inherit;
+    font-size: 20px;
+    line-height: 1;
+    cursor: pointer;
+    padding: 0 4px;
+    opacity: 0.75;
+  }
+  .toast-x:hover { opacity: 1; }
+  @keyframes toast-in {
+    from { opacity: 0; transform: translateY(-4px); }
+    to   { opacity: 1; transform: translateY(0); }
   }
 
   /* PLAYER */
@@ -168,7 +219,7 @@ export const cardStyles = css`
     height: clamp(140px, 36vh, 240px);
     max-height: 100%;
     max-width: 100%;
-    border-radius: 18px;
+    border-radius: var(--wp-radius-tile);
     overflow: hidden;
     background-size: cover;
     background-position: center;
@@ -251,6 +302,27 @@ export const cardStyles = css`
   .vol-icon {
     display: flex;
     flex-shrink: 0;
+  }
+  /* The volume icon doubles as the mute toggle. */
+  .mute-btn {
+    background: none;
+    border: 0;
+    color: var(--wp-text);
+    cursor: pointer;
+    padding: 6px;
+    margin: -6px;
+    border-radius: 50%;
+    align-items: center;
+    justify-content: center;
+  }
+  /* Dim the whole volume row while muted so the state is readable at
+     a glance from across the room. */
+  .vol-row.muted .slider,
+  .vol-row.muted .vol-num {
+    opacity: 0.35;
+  }
+  .vol-row.muted .mute-btn {
+    color: var(--wp-accent);
   }
   .vol-num {
     flex-shrink: 0;
@@ -425,7 +497,7 @@ export const cardStyles = css`
   .fav-art {
     width: 44px;
     height: 44px;
-    border-radius: 8px;
+    border-radius: var(--wp-radius-tile-sm);
     flex-shrink: 0;
     background-size: cover;
     background-position: center;
@@ -442,7 +514,7 @@ export const cardStyles = css`
     align-items: center;
     padding: 10px 14px;
     background: var(--wp-overlay);
-    border-radius: 14px;
+    border-radius: var(--wp-radius-tile-sm);
     margin-bottom: 12px;
     gap: 14px;
   }
@@ -491,6 +563,15 @@ export const cardStyles = css`
     background: var(--wp-accent-soft);
     color: var(--wp-bg);
   }
+  /* Optimistic state: tap registered, join/unjoin still in flight.
+     Gentle pulse tells the user the change is being applied. */
+  .grp-row.pending {
+    animation: grp-pending 1s ease-in-out infinite;
+  }
+  @keyframes grp-pending {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.6; }
+  }
   .grp-row.primary {
     background: var(--wp-accent);
     color: var(--wp-bg);
@@ -510,7 +591,7 @@ export const cardStyles = css`
     margin-top: 14px;
     padding: 14px 16px;
     background: var(--wp-overlay);
-    border-radius: 16px;
+    border-radius: var(--wp-radius-tile);
   }
   .grp-volumes-title {
     font-size: 11px;
@@ -554,7 +635,7 @@ export const cardStyles = css`
   .menu-card {
     width: min(92%, 380px);
     background: var(--wp-card-2);
-    border-radius: 18px;
+    border-radius: var(--wp-radius-tile);
     padding: 8px;
     box-shadow: var(--wp-shadow-menu);
     max-height: 80%;
@@ -578,7 +659,7 @@ export const cardStyles = css`
     color: var(--wp-text);
     border: 0;
     cursor: pointer;
-    border-radius: 12px;
+    border-radius: var(--wp-radius-tile-sm);
     font-size: 15px;
     font-weight: 500;
   }
@@ -628,5 +709,15 @@ export const cardStyles = css`
      content remains reachable on a phone-sized viewport. */
   :host([narrow]) .pv-scroll {
     overflow-y: auto;
+  }
+
+  /* ACCESSIBILITY — keyboard focus. :focus-visible only fires for
+     keyboard/switch navigation, so touch and mouse users never see the
+     ring. Applies to every interactive surface including the custom
+     sliders (which are focusable via tabindex). */
+  button:focus-visible,
+  .slider:focus-visible {
+    outline: 2px solid var(--wp-accent);
+    outline-offset: 2px;
   }
 `;
